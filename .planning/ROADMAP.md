@@ -47,20 +47,27 @@
 6. Switching command tabs does not unmount the Terminal component (CSS display toggle, not React unmount)
 7. The old OutputPane toggle behavior is fully removed from App.tsx
 
-**Plans:** 3 plans in 2 waves
+**Plans:** 4 plans in 3 waves
 
 <details>
 <summary>Plans (Wave 1)</summary>
 
-- [ ] 17-01-PLAN.md — Install xterm.js packages, create Terminal.tsx with FitAddon/WebglAddon/WebLinksAddon, add terminal CSS
+- [x] 17-01-PLAN.md — Install xterm.js packages, create Terminal.tsx with FitAddon/WebglAddon/WebLinksAddon, add terminal CSS
 
 </details>
 
 <details>
 <summary>Plans (Wave 2)</summary>
 
-- [ ] 17-02-PLAN.md — Remove OutputPane from App.tsx (state, imports, shortcuts), add split pane layout with useResizable divider + Terminal component
-- [ ] 17-03-PLAN.md — Add ptyOutput/ptyExit to events.ts, regenerate Wails bindings, subscribe to pty-output/pty-exit events in Terminal.tsx
+- [x] 17-02-PLAN.md — Remove OutputPane from App.tsx (state, imports, shortcuts), add split pane layout with useResizable divider + Terminal component
+- [x] 17-03-PLAN.md — Add ptyOutput/ptyExit to events.ts, regenerate Wails bindings, subscribe to pty-output/pty-exit events in Terminal.tsx
+
+</details>
+
+<details>
+<summary>Plans (Wave 3 — Gap Closure)</summary>
+
+- [ ] 17-04-PLAN.md — Route RunCommand output to xterm.js terminal via cmd-output event subscription (gap closure: UAT Test 5)
 
 </details>
 
@@ -125,7 +132,7 @@
 | 14 | v1.4 Editor Multi-Mount Refactor | — | Shipped 2026-04-23 |
 | 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
 | 16 | 3/3 | Complete   | 2026-05-19 |
-| 17 | v2.0 Terminal Integration | 7 | Planned |
+| 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
 | 18 | v2.0 Terminal Integration | 6 | Pending |
 | 19 | v2.0 Terminal Integration | 4 | Pending |
 
