@@ -4,6 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { Events } from '@wailsio/runtime';
+import { eventNames } from '../wails/events';
 
 interface TerminalComponentProps {
   monoFont: string;
@@ -91,6 +93,28 @@ const TerminalComponent: React.FC<TerminalComponentProps> = ({ monoFont, isVisib
       }
     };
   }, [monoFont]);
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+
+    const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
+      const output = event?.data?.data;
+      if (output) {
+        term.write(output);
+      }
+    });
+
+    const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
+      const { exitCode, wasIntentional } = event?.data ?? {};
+      console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
+    });
+
+    return () => {
+      cleanupOutput();
+      cleanupExit();
+    };
+  }, []);
 
   return (
     <div
