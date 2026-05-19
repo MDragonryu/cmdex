@@ -58,7 +58,6 @@ export const SHORTCUTS = {
   search:         { keys: ['cmd', 'f'] },
   settings:       { keys: ['cmd', ','] },
   shortcuts:      { keys: ['cmd', 'shift', '?'] },
-  toggleOutput:   { keys: ['ctrl', '`'] },
   escape:         { keys: ['escape'] },
   discardScript:  { keys: ['cmd', 'shift', 'backspace'] },
   scriptNewLine:  { keys: ['shift', 'enter'] },
