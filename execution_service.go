@@ -106,7 +106,9 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	workingDir := s.resolveWorkingDir(cmd)
 
 	result := executor.ExecuteScript(resolvedScript, workingDir, func(chunk OutputChunk) {
-		wailsApp.Event.Emit(eventNames.CmdOutput, chunk)
+		wailsApp.Event.Emit(eventNames.PtyOutput, map[string]interface{}{
+			"data": chunk.Data,
+		})
 	})
 
 	record := ExecutionRecord{
