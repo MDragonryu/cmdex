@@ -207,17 +207,14 @@ func TestTerminalExit(t *testing.T) {
 	s.stopCh = make(chan struct{}, 1)
 
 	go s.monitorExit()
+	defer s.Stop()
 
-	// Wait for exit to be detected and auto-restart.
-	// The shell exits immediately (exit 0), monitorExit should detect it.
-	// Auto-restart happens after 100ms delay.
-	// We just verify the original process exited.
+	// Wait for the shell to exit (exit 0 finishes immediately).
 	_ = cmd.Wait()
-	_ = ptmx
+	ptmx.Close()
 
-	// Small wait for monitorExit to process.
-	// The original cmd should have a non-nil ProcessState after Wait.
-	if s.cmd != nil && s.cmd.ProcessState == nil {
+	// After Wait(), cmd.ProcessState must be non-nil (process exited).
+	if cmd.ProcessState == nil {
 		t.Error("process state is nil after shell exit")
 	}
 }

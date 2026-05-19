@@ -55,6 +55,9 @@ func detectShell() (path, flag string) {
 
 // emitOutput sends PTY output data to the frontend via Wails event.
 func (s *TerminalService) emitOutput(data string) {
+	if wailsApp == nil {
+		return
+	}
 	wailsApp.Event.Emit(eventNames.PtyOutput, map[string]interface{}{
 		"data": data,
 	})
@@ -128,10 +131,12 @@ func (s *TerminalService) monitorExit() {
 		wasIntentional = true
 	}
 
-	wailsApp.Event.Emit(eventNames.PtyExit, map[string]interface{}{
-		"exitCode":      exitCode,
-		"wasIntentional": wasIntentional,
-	})
+	if wailsApp != nil {
+		wailsApp.Event.Emit(eventNames.PtyExit, map[string]interface{}{
+			"exitCode":      exitCode,
+			"wasIntentional": wasIntentional,
+		})
+	}
 
 	restartMsg := fmt.Sprintf("\r\n[shell exited with code %d — restarting...]\r\n", exitCode)
 	s.emitOutput(restartMsg)
