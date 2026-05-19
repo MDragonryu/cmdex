@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -50,6 +53,55 @@ func detectShell() (path, flag string) {
 	return path, flag
 }
 
+// emitOutput sends PTY output data to the frontend via Wails event.
+func (s *TerminalService) emitOutput(data string) {
+	wailsApp.Event.Emit(eventNames.PtyOutput, map[string]interface{}{
+		"data": data,
+	})
+}
+
+// readLoop drains PTY output in a background goroutine, batching reads at
+// 16ms intervals with 64KB max chunks before emitting via emitOutput.
+func (s *TerminalService) readLoop() {
+	reader := bufio.NewReaderSize(s.ptmx, 64*1024)
+	ticker := time.NewTicker(16 * time.Millisecond)
+	defer ticker.Stop()
+
+	var buf bytes.Buffer
+	buf.Grow(64 * 1024)
+
+	for {
+		select {
+		case <-s.stopCh:
+			if buf.Len() > 0 {
+				s.emitOutput(buf.String())
+			}
+			return
+		case <-ticker.C:
+			if buf.Len() > 0 {
+				s.emitOutput(buf.String())
+				buf.Reset()
+			}
+		default:
+			chunk := make([]byte, 4096)
+			n, err := reader.Read(chunk)
+			if n > 0 {
+				buf.Write(chunk[:n])
+				if buf.Len() >= 64*1024 {
+					s.emitOutput(buf.String())
+					buf.Reset()
+				}
+			}
+			if err != nil {
+				if buf.Len() > 0 {
+					s.emitOutput(buf.String())
+				}
+				return
+			}
+		}
+	}
+}
+
 func (s *TerminalService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	return s.Start(80, 24)
 }
@@ -80,6 +132,8 @@ func (s *TerminalService) Start(cols, rows int) error {
 	s.cmd = cmd
 	s.stopCh = make(chan struct{}, 1)
 
+	go s.readLoop()
+
 	return nil
 }
 
@@ -90,6 +144,8 @@ func (s *TerminalService) Stop() error {
 	if s.stopCh != nil {
 		close(s.stopCh)
 	}
+
+	time.Sleep(50 * time.Millisecond)
 
 	if s.cmd != nil && s.ptmx != nil {
 		s.ptmx.Close()
