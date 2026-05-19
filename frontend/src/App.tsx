@@ -109,7 +109,7 @@ const CUSTOM_THEMES_KEY = 'cmdex-custom-themes';
 const FONT_SANS_KEY = 'cmdex-ui-font';
 const FONT_MONO_KEY = 'cmdex-mono-font';
 const DENSITY_KEY = 'cmdex-density';
-const MAX_STREAM_LINES = 5000;
+
 
 function App() {
     const { t } = useTranslation();
@@ -125,9 +125,6 @@ function App() {
     const [serverVariables, setServerVariables] = useState<VarPromptType[]>([]);
     const [currentResolvedValues, setCurrentResolvedValues] = useState<Record<string, string>>({});
     const [lastSelectedPresetId, setLastSelectedPresetId] = useState<string>('');
-    const [streamLines, setStreamLines] = useState<string[]>([]);
-    const streamBufferRef = useRef<string[]>([]);
-    const streamFlushRef = useRef<number | null>(null);
     const executingTabIdRef = useRef<string | null>(null);
     const [executingTabIdState, setExecutingTabIdState] = useState<string | null>(null);
 
@@ -137,7 +134,6 @@ function App() {
     const selectedRecordRef = useSyncedRef(selectedRecord);
     const selectedCommandRef = useSyncedRef(selectedCommand);
     const selectedCommandId = selectedCommand?.id;
-    const streamLinesRef = useSyncedRef(streamLines);
     const historyPaneOpenRef = useSyncedRef(historyPaneOpen);
 
     const [openTabs, setOpenTabs] = useState<Tab[]>([]);
@@ -590,7 +586,6 @@ function App() {
                 const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
                 if (nextTab) {
                     setSelectedRecord(null);
-                    setStreamLines([]);
                     applyPaneState(nextTab.id);
                     if (isNewCommandTabId(nextTab.id)) {
                         const d = tabDraftsRef.current[nextTab.id];
@@ -604,8 +599,7 @@ function App() {
                     setSelectedCommand(null);
                     setActiveTabId(null);
                     setSelectedRecord(null);
-                    setStreamLines([]);
-                }
+                                    }
             }
             setOpenTabs(newTabs);
             setTabDrafts((prev) => {
@@ -641,8 +635,7 @@ function App() {
             setTabBaselines((prev) => ({ ...prev, [id]: baseline }));
             setSelectedCommand(makePlaceholderCommand(id, defaultCategoryId));
             setSelectedRecord(null);
-            setStreamLines([]);
-            setActiveTabId(id);
+                        setActiveTabId(id);
             setOpenTabs((prev) => [...prev, { id, title: t('commandEditor.newCommand') }]);
             tabPaneStateRef.current[id] = { historyOpen: false };
             applyPaneState(id);
@@ -676,8 +669,7 @@ function App() {
             return;
         }
         setSelectedRecord(null);
-        setStreamLines([]);
-        tabPaneStateRef.current[cmd.id] = { historyOpen: false };
+                tabPaneStateRef.current[cmd.id] = { historyOpen: false };
         applyPaneState(cmd.id);
         const g = (scriptFetchGenRef.current[cmd.id] = (scriptFetchGenRef.current[cmd.id] ?? 0) + 1);
         void GetScriptBody(cmd.id)
@@ -829,8 +821,7 @@ function App() {
         }
         setActiveTabId(tabId);
         setSelectedRecord(null);
-        setStreamLines([]);
-        applyPaneState(tabId);
+                applyPaneState(tabId);
         if (isNewCommandTabId(tabId)) {
             const d = tabDraftsRef.current[tabId];
             setSelectedCommand(makePlaceholderCommand(tabId, d?.categoryId));
@@ -918,52 +909,16 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, []);
 
-    const flushStreamBuffer = useCallback(() => {
-        const execTabId = executingTabIdRef.current;
-        const newLines = streamBufferRef.current;
-        streamBufferRef.current = [];
-        streamFlushRef.current = null;
-
-        if (execTabId === activeTabIdRef.current) {
-            setStreamLines((prev) => {
-                const combined = [...prev, ...newLines];
-                if (combined.length > MAX_STREAM_LINES) {
-                    return combined.slice(combined.length - MAX_STREAM_LINES);
-                }
-                return combined;
-            });
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
-    }, []);
-
     const runCommandDirect = useCallback(async (commandId: string, variables: Record<string, string>) => {
         const execTabId = activeTabIdRef.current;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         setIsExecuting(true);
         setSelectedRecord(null);
-        setStreamLines([]);
-        streamBufferRef.current = [];
         setHistoryPaneOpen(true);
-
-        const cleanup = Events.On(eventNames.cmdOutput, (event) => {
-            const chunk = event.data as { stream: string; data: string };
-            const prefix = chunk.stream === 'stderr' ? '\x1b[stderr]' : '';
-            streamBufferRef.current.push(prefix + chunk.data);
-            if (streamFlushRef.current === null) {
-                streamFlushRef.current = requestAnimationFrame(flushStreamBuffer);
-            }
-        });
 
         try {
             const record = await RunCommand(commandId, variables);
-            if (streamFlushRef.current !== null) {
-                cancelAnimationFrame(streamFlushRef.current);
-                streamFlushRef.current = null;
-            }
-            if (streamBufferRef.current.length > 0) {
-                flushStreamBuffer();
-            }
             if (execTabId === activeTabIdRef.current) {
                 setSelectedRecord(record);
             }
@@ -990,13 +945,12 @@ function App() {
             }
             toast.error(t('toast.commandFailed', { code: -1 }));
         } finally {
-            cleanup();
             executingTabIdRef.current = null;
             setExecutingTabIdState(null);
             setIsExecuting(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
-    }, [flushStreamBuffer, t, loadHistory]);
+    }, [t, loadHistory]);
 
     const handleExecute = useCallback(async (tabId: string, values: Record<string, string>) => {
         if (isNewCommandTabId(tabId)) return;
@@ -1246,8 +1200,7 @@ function App() {
 
     const handleSelectRecord = (record: ExecutionRecord) => {
         setSelectedRecord(record);
-        setStreamLines([]);
-        setHistoryPaneOpen(true);
+                setHistoryPaneOpen(true);
     };
 
     const handleClearHistory = () => {
@@ -1259,8 +1212,7 @@ function App() {
             await ClearExecutionHistory();
             setExecutionHistory([]);
             setSelectedRecord(null);
-            setStreamLines([]);
-            setModal({ type: 'none' });
+                        setModal({ type: 'none' });
         } catch (err) {
             console.error('Failed to clear history:', err);
         }
