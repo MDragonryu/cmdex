@@ -26,7 +26,7 @@
 
 - [x] 16-01-PLAN.md — TerminalService struct, service registration, event constants, Unix PTY lifecycle (creack/pty), Windows stubs, shell detection (Wave 1)
 - [x] 16-02-PLAN.md — PTY output streaming with 16ms batching, 64KB chunks, pty-output/pty-exit events, shell exit detection, auto-restart (Wave 2)
-- [ ] 16-03-PLAN.md — Test suite for all 7 requirements, Windows go-winpty integration, package legitimacy gate (Wave 2)
+- [x] 16-03-PLAN.md — Test suite for all 7 requirements, Windows go-winpty integration, package legitimacy gate (Wave 2)
 
 </details>
 
@@ -116,7 +116,7 @@
 | 10-13 | v1.3 Working Directory | 14 | Shipped 2026-04-23 |
 | 14 | v1.4 Editor Multi-Mount Refactor | — | Shipped 2026-04-23 |
 | 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
-| 16 | 2/3 | In Progress|  |
+| 16 | 3/3 | Complete   | 2026-05-19 |
 | 17 | v2.0 Terminal Integration | 7 | Pending |
 | 18 | v2.0 Terminal Integration | 6 | Pending |
 | 19 | v2.0 Terminal Integration | 4 | Pending |
