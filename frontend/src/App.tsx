@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import './style.css';
 import { useSyncedRef } from './hooks/useSyncedRef';
+import { useResizable } from './hooks/useResizable';
 import Sidebar from './components/Sidebar';
 import CategoryEditor from './components/CategoryEditor';
 import VariablePrompt from './components/VariablePrompt';
@@ -163,6 +164,43 @@ function App() {
     const [monoFont, setMonoFont] = useState<string>('JetBrains Mono');
     const [density, setDensity] = useState<string>('comfortable');
     const [defaultWorkingDir, setDefaultWorkingDir] = useState<OSPathMap>({});
+
+    // Terminal split pane state
+    const TERM_STORAGE_KEY = 'cmdex-terminal-height';
+    const MIN_TERM_HEIGHT = 100;
+    const MAX_TERM_HEIGHT_PCT = 0.85;
+
+    const viewportHeight = window.innerHeight;
+    const defaultTermHeight = Math.round(viewportHeight * 0.40);
+    const maxTermHeight = Math.round(viewportHeight * MAX_TERM_HEIGHT_PCT);
+
+    const { size: terminalHeight, isDragging, handleStart } = useResizable({
+        axis: 'y',
+        direction: -1,
+        minSize: MIN_TERM_HEIGHT,
+        maxSize: maxTermHeight,
+        defaultSize: defaultTermHeight,
+        storageKey: TERM_STORAGE_KEY,
+    });
+
+    const [terminalCollapsed, setTerminalCollapsed] = useState<boolean>(() => {
+        return localStorage.getItem(`${TERM_STORAGE_KEY}-collapsed`) === 'true';
+    });
+
+    const collapseTerminal = useCallback(() => {
+        setTerminalCollapsed(true);
+        localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'true');
+    }, []);
+
+    const expandTerminal = useCallback(() => {
+        setTerminalCollapsed(false);
+        localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
+    }, []);
+
+    const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        handleStart(e.clientY);
+    }, [handleStart]);
 
     // Tracks whether settings have been loaded from DB (prevents premature saves before load)
     const settingsLoadedRef = useRef(false);
@@ -1390,84 +1428,124 @@ function App() {
                             onCloseTab={closeTab}
                         />
 
-                        <div className="top-area">
-                            <div className="main-content" ref={mainContentRef}>
-                                {/* Loading state: selectedCommand exists but draft hasn't hydrated yet */}
-                                {selectedCommand && !activeDraft && (
-                                    <div className="main-body">
-                                        <p className="text-muted-foreground text-sm p-4">{t('common.loading')}</p>
-                                    </div>
-                                )}
+                        <div className="center-area-split">
+                            <div className="center-area-editor">
+                                <div className="main-content" ref={mainContentRef}>
+                                    {/* Loading state: selectedCommand exists but draft hasn't hydrated yet */}
+                                    {selectedCommand && !activeDraft && (
+                                        <div className="main-body">
+                                            <p className="text-muted-foreground text-sm p-4">{t('common.loading')}</p>
+                                        </div>
+                                    )}
 
-                                {/* Welcome state: no command selected and no active draft */}
-                                {!selectedCommand && !activeDraft && (
-                                    <div className="main-body">
-                                        <WelcomeTab onNewCommand={() => openNewCommandTab()} />
-                                    </div>
-                                )}
+                                    {/* Welcome state: no command selected and no active draft */}
+                                    {!selectedCommand && !activeDraft && (
+                                        <div className="main-body">
+                                            <WelcomeTab onNewCommand={() => openNewCommandTab()} />
+                                        </div>
+                                    )}
 
-                                {/* Per-tab mounts: one CommandDetailTab per open command tab.
-                                    Inactive tabs are hidden via display:none so their DOM state
-                                    (scroll, cursor, textarea undo) survives across tab switches. */}
-                                {openTabs
-                                    .filter((tab) => tab.id !== '__welcome__')
-                                    .map((tab) => {
-                                        const draft = tabDrafts[tab.id];
-                                        const baseline = tabBaselines[tab.id];
-                                        const isTabNew = isNewCommandTabId(tab.id);
-                                        const command = isTabNew
-                                            ? makePlaceholderCommand(tab.id, draft?.categoryId)
-                                            : commands.find((c) => c.id === tab.id) ?? null;
-                                        const isTabDirty = !!(draft && baseline && !draftsEqual(draft, baseline));
-                                        const isTabActive = tab.id === activeTabId;
+                                    {/* Per-tab mounts: one CommandDetailTab per open command tab.
+                                        Inactive tabs are hidden via display:none so their DOM state
+                                        (scroll, cursor, textarea undo) survives across tab switches. */}
+                                    {openTabs
+                                        .filter((tab) => tab.id !== '__welcome__')
+                                        .map((tab) => {
+                                            const draft = tabDrafts[tab.id];
+                                            const baseline = tabBaselines[tab.id];
+                                            const isTabNew = isNewCommandTabId(tab.id);
+                                            const command = isTabNew
+                                                ? makePlaceholderCommand(tab.id, draft?.categoryId)
+                                                : commands.find((c) => c.id === tab.id) ?? null;
+                                            const isTabDirty = !!(draft && baseline && !draftsEqual(draft, baseline));
+                                            const isTabActive = tab.id === activeTabId;
 
-                                        const tabVariables = isTabActive
-                                            ? resolvedVariables
-                                            : (tabVariablesMap[tab.id] ?? []);
+                                            const tabVariables = isTabActive
+                                                ? resolvedVariables
+                                                : (tabVariablesMap[tab.id] ?? []);
 
-                                        if (!command || !draft) return null;
+                                            if (!command || !draft) return null;
 
-                                        return (
-                                            <CommandDetailTab
-                                                key={tab.id}
-                                                tabId={tab.id}
-                                                command={command}
-                                                draft={draft}
-                                                baseline={baseline}
-                                                isTabNew={isTabNew}
-                                                isTabActive={isTabActive}
-                                                isTabDirty={isTabDirty}
-                                                isExecuting={tab.id === executingTabId}
-                                                variables={tabVariables}
-                                                currentOS={currentOS}
-                                                defaultWorkingDir={defaultWorkingDir}
-                                                onDraftChange={(partial) => updateDraft(tab.id, partial)}
-                                                onExecute={handleExecute}
-                                                onRunInTerminal={handleRunInTerminal}
-                                                onFillVariables={handleFillVariablesByTab}
-                                                onRenamePreset={handleRenamePresetForTab}
-                                                onDeletePreset={handleDeletePresetForTab}
-                                                onAddPreset={handleAddPresetForTab}
-                                                onSavePresetValues={handleSavePresetValuesForTab}
-                                                onReorderPresets={handleReorderPresetsForTab}
-                                                onSaveScript={handleSaveScript}
-                                                onResolvedValuesChange={isTabActive ? setCurrentResolvedValues : undefined}
-                                                onSave={() => void handleSaveTab(tab.id)}
-                                                onDiscard={() => handleDiscardTab(tab.id)}
-                                            />
-                                        );
-                                    })}
+                                            return (
+                                                <CommandDetailTab
+                                                    key={tab.id}
+                                                    tabId={tab.id}
+                                                    command={command}
+                                                    draft={draft}
+                                                    baseline={baseline}
+                                                    isTabNew={isTabNew}
+                                                    isTabActive={isTabActive}
+                                                    isTabDirty={isTabDirty}
+                                                    isExecuting={tab.id === executingTabId}
+                                                    variables={tabVariables}
+                                                    currentOS={currentOS}
+                                                    defaultWorkingDir={defaultWorkingDir}
+                                                    onDraftChange={(partial) => updateDraft(tab.id, partial)}
+                                                    onExecute={handleExecute}
+                                                    onRunInTerminal={handleRunInTerminal}
+                                                    onFillVariables={handleFillVariablesByTab}
+                                                    onRenamePreset={handleRenamePresetForTab}
+                                                    onDeletePreset={handleDeletePresetForTab}
+                                                    onAddPreset={handleAddPresetForTab}
+                                                    onSavePresetValues={handleSavePresetValuesForTab}
+                                                    onReorderPresets={handleReorderPresetsForTab}
+                                                    onSaveScript={handleSaveScript}
+                                                    onResolvedValuesChange={isTabActive ? setCurrentResolvedValues : undefined}
+                                                    onSave={() => void handleSaveTab(tab.id)}
+                                                    onDiscard={() => handleDiscardTab(tab.id)}
+                                                />
+                                            );
+                                        })}
+
+                                    {!isWelcome && (
+                                        <HistoryPane
+                                            records={commandHistory}
+                                            selectedRecordId={selectedRecord?.id || null}
+                                            onSelectRecord={handleSelectRecord}
+                                            onClearHistory={handleClearHistory}
+                                            defaultCollapsed={!historyPaneOpen}
+                                        />
+                                    )}
+                                </div>
                             </div>
 
-                            {!isWelcome && (
-                                <HistoryPane
-                                    records={commandHistory}
-                                    selectedRecordId={selectedRecord?.id || null}
-                                    onSelectRecord={handleSelectRecord}
-                                    onClearHistory={handleClearHistory}
-                                    defaultCollapsed={!historyPaneOpen}
-                                />
+                            {!terminalCollapsed && (
+                                <div
+                                    className={`terminal-divider ${isDragging ? 'dragging' : ''}`}
+                                    onMouseDown={handleTerminalResizeStart}
+                                >
+                                    <button
+                                        className="terminal-collapse-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={collapseTerminal}
+                                        aria-label="Collapse terminal panel"
+                                    >
+                                        ▼
+                                    </button>
+                                </div>
                             )}
+
+                            <div
+                                className="terminal-pane"
+                                style={terminalCollapsed
+                                    ? { height: 8, minHeight: 8, maxHeight: 8 }
+                                    : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
+                                }
+                            >
+                                <TerminalComponent
+                                    monoFont={monoFont || 'JetBrains Mono, Fira Code, monospace'}
+                                    isVisible={!terminalCollapsed}
+                                />
+                                {terminalCollapsed && (
+                                    <button
+                                        className="terminal-collapsed-rail"
+                                        onClick={expandTerminal}
+                                        aria-label="Expand terminal panel"
+                                    >
+                                        ▲
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
