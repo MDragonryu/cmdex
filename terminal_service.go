@@ -102,6 +102,45 @@ func (s *TerminalService) readLoop() {
 	}
 }
 
+// monitorExit waits for the shell process to exit, emits a pty-exit event,
+// writes a restart message to terminal output, and auto-restarts the shell.
+func (s *TerminalService) monitorExit() {
+	err := s.cmd.Wait()
+
+	select {
+	case <-s.stopCh:
+		return
+	default:
+	}
+
+	exitCode := 0
+	wasIntentional := false
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	if exitCode == 0 {
+		wasIntentional = true
+	}
+
+	wailsApp.Event.Emit(eventNames.PtyExit, map[string]interface{}{
+		"exitCode":      exitCode,
+		"wasIntentional": wasIntentional,
+	})
+
+	restartMsg := fmt.Sprintf("\r\n[shell exited with code %d — restarting...]\r\n", exitCode)
+	s.emitOutput(restartMsg)
+
+	time.Sleep(100 * time.Millisecond)
+
+	_ = s.Start(int(s.lastSize.Cols), int(s.lastSize.Rows))
+}
+
 func (s *TerminalService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	return s.Start(80, 24)
 }
@@ -133,6 +172,7 @@ func (s *TerminalService) Start(cols, rows int) error {
 	s.stopCh = make(chan struct{}, 1)
 
 	go s.readLoop()
+	go s.monitorExit()
 
 	return nil
 }
