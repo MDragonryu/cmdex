@@ -914,43 +914,23 @@ function App() {
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         setIsExecuting(true);
-        setSelectedRecord(null);
-        setHistoryPaneOpen(true);
 
         try {
-            const record = await RunCommand(commandId, variables);
+            await RunCommand(commandId, variables);
             if (execTabId === activeTabIdRef.current) {
-                setSelectedRecord(record);
-            }
-            await loadHistory();
-            if (record.exitCode === 0) {
                 toast.success(t('toast.commandSuccess'));
-            } else {
-                toast.error(t('toast.commandFailed', { code: record.exitCode }));
             }
         } catch (err) {
-            const errRecord: ExecutionRecord = {
-                id: '',
-                commandId: commandId,
-                scriptContent: '',
-                finalCmd: '',
-                output: '',
-                error: String(err),
-                exitCode: -1,
-                workingDir: '',
-                executedAt: new Date().toISOString(),
-            };
             if (execTabId === activeTabIdRef.current) {
-                setSelectedRecord(errRecord);
+                toast.error(t('toast.commandFailed', { code: -1 }));
             }
-            toast.error(t('toast.commandFailed', { code: -1 }));
         } finally {
             executingTabIdRef.current = null;
             setExecutingTabIdState(null);
             setIsExecuting(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
-    }, [t, loadHistory]);
+    }, [t]);
 
     const handleExecute = useCallback(async (tabId: string, values: Record<string, string>) => {
         if (isNewCommandTabId(tabId)) return;
