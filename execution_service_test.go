@@ -53,7 +53,7 @@ func TestRunCommand_PTYWriteWithWorkingDir(t *testing.T) {
 	workingDirJSON := `{"darwin":"/Users/test"}`
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, ?, 0)`,
-		cmdID, catID, "Test Cmd WD", "echo hello", workingDirJSON,
+		cmdID, catID, "Test Cmd WD", GenerateScript("echo hello"), workingDirJSON,
 	)
 	if err != nil {
 		t.Fatalf("insert command: %v", err)
@@ -127,7 +127,7 @@ func TestRunCommand_PTYWriteNoWorkingDir(t *testing.T) {
 	// Command with no working dir (empty OSPathMap).
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, '{}', 0)`,
-		cmdID, catID, "Test Cmd NoWD", "echo hello",
+		cmdID, catID, "Test Cmd NoWD", GenerateScript("echo hello"),
 	)
 	if err != nil {
 		t.Fatalf("insert command: %v", err)
@@ -147,6 +147,71 @@ func TestRunCommand_PTYWriteNoWorkingDir(t *testing.T) {
 	}
 
 	expected := "echo hello\n"
+	if string(written) != expected {
+		t.Errorf("RunCommand wrote %q, want %q", string(written), expected)
+	}
+
+	if record.CommandID != cmdID {
+		t.Errorf("CommandID = %q, want %q", record.CommandID, cmdID)
+	}
+	if record.Error != "" {
+		t.Errorf("Error = %q, want empty", record.Error)
+	}
+}
+
+// TestRunCommand_PTYWriteMultilineScript verifies that RunCommand preserves
+// internal newlines in multi-line scripts while stripping only the trailing
+// newline from the cd sandwich.
+func TestRunCommand_PTYWriteMultilineScript(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	prevTerminalSvc := terminalSvc
+	terminalSvc = &TerminalService{ptmx: w}
+	defer func() { terminalSvc = prevTerminalSvc }()
+
+	initDB, err := NewDB()
+	if err != nil {
+		t.Skipf("cannot open test DB: %v", err)
+	}
+	defer initDB.Close()
+
+	catID := "test-cat-ml-18"
+	cmdID := "test-cmd-ml-18"
+	testCleanup(t, initDB, catID, cmdID)
+
+	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, "TestML")
+	if err != nil {
+		t.Fatalf("insert category: %v", err)
+	}
+
+	workingDirJSON := `{"darwin":"/Users/test"}`
+	_, err = initDB.conn.Exec(
+		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, ?, 0)`,
+		cmdID, catID, "Test Cmd ML", GenerateScript("line1\nline2"), workingDirJSON,
+	)
+	if err != nil {
+		t.Fatalf("insert command: %v", err)
+	}
+
+	prevDB := db
+	db = initDB
+	defer func() { db = prevDB }()
+
+	svc := &ExecutionService{}
+	record := svc.RunCommand(cmdID, nil)
+
+	w.Close()
+	written, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading PTY pipe: %v", err)
+	}
+
+	expected := "cd '/Users/test' && line1\nline2 && cd ~\n"
 	if string(written) != expected {
 		t.Errorf("RunCommand wrote %q, want %q", string(written), expected)
 	}

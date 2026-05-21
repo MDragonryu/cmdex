@@ -341,6 +341,7 @@ func (e *Executor) terminalDefs() []terminalDef {
 func (e *Executor) darwinTerminals() []terminalDef {
 	osa := func(appName, script string) func(*Executor, string, string) error {
 		return func(_ *Executor, body string, workingDir string) error {
+			body = strings.TrimRight(body, "\n")
 			if workingDir != "" {
 				body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 			}
@@ -376,6 +377,7 @@ end tell`),
 		{
 			ID: "warp", Name: "Warp", Paths: []string{"/Applications/Warp.app"}, IsApp: true,
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
+				body = strings.TrimRight(body, "\n")
 				if workingDir != "" {
 					body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 				}
@@ -488,6 +490,7 @@ func (e *Executor) linuxTerminals() []terminalDef {
 			})},
 		{ID: "xterm", Name: "XTerm", Paths: []string{"xterm"},
 			LaunchFn: func(ex *Executor, body string, workingDir string) error {
+				body = strings.TrimRight(body, "\n")
 				if workingDir != "" {
 					body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 				}
