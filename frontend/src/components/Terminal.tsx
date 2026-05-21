@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -6,16 +6,29 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
 import { eventNames } from '../wails/events';
+import { Write } from '../../bindings/cmdex/terminalservice';
 
 interface TerminalComponentProps {
   monoFont: string;
   isVisible: boolean;
 }
 
-const TerminalComponent: React.FC<TerminalComponentProps> = ({ monoFont, isVisible }) => {
+export interface TerminalHandle {
+    clear: () => void;
+}
+
+const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
+    ({ monoFont, isVisible }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+
+  useImperativeHandle(ref, () => ({
+      clear: () => {
+          terminalRef.current?.clear();
+          Write('clear\r').catch((err) => console.error('clear failed:', err));
+      },
+  }));
 
   useEffect(() => {
     const term = new Terminal({
@@ -116,6 +129,46 @@ const TerminalComponent: React.FC<TerminalComponentProps> = ({ monoFont, isVisib
     };
   }, []);
 
+  useEffect(() => {
+      const term = terminalRef.current;
+      if (!term) return;
+
+      let keystrokeBuffer = '';
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const flushBuffer = () => {
+          if (keystrokeBuffer.length > 0) {
+              const batch = keystrokeBuffer;
+              keystrokeBuffer = '';
+              Write(batch).catch((err) => console.error('TerminalService.Write failed:', err));
+          }
+          if (flushTimer) {
+              clearTimeout(flushTimer);
+              flushTimer = null;
+          }
+      };
+
+      const handleData = (data: string) => {
+          keystrokeBuffer += data;
+          if (data === '\r') {
+              // Enter key — flush immediately
+              flushBuffer();
+          } else {
+              // Reset idle timer: flush after 50ms of inactivity
+              if (flushTimer) clearTimeout(flushTimer);
+              flushTimer = setTimeout(flushBuffer, 50);
+          }
+      };
+
+      term.onData(handleData);
+
+      return () => {
+          // Cleanup: flush any remaining keystrokes and clear timer
+          if (flushTimer) clearTimeout(flushTimer);
+          flushBuffer();
+      };
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -123,6 +176,7 @@ const TerminalComponent: React.FC<TerminalComponentProps> = ({ monoFont, isVisib
       style={{ display: isVisible ? 'flex' : 'none' }}
     />
   );
-};
+  }
+);
 
 export default TerminalComponent;
