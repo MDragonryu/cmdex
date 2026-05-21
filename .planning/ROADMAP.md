@@ -88,10 +88,11 @@
 6. Clear button resets the terminal scrollback buffer
 
 <details>
-<summary>Plans (2 plans in 2 waves)</summary>
+<summary>Plans (3 plans — 2 built + 1 gap closure)</summary>
 
 - [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
 - [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
+- [ ] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
 
 </details>
 
@@ -132,7 +133,7 @@
 | 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
 | 16 | 3/3 | Complete   | 2026-05-19 |
 | 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
-| 18 | 2/2 | Complete   | 2026-05-21 |
+| 18 | 2/3 | Gap closure   | 2026-05-21 |
 | 19 | v2.0 Terminal Integration | 4 | Pending |
 
 **Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
