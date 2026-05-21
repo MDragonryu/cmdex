@@ -130,9 +130,20 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
     });
 
+    const cleanupCmd = Events.On(eventNames.cmdOutput, (event: { data: { stream: string; data: string } }) => {
+      const chunk = event?.data;
+      if (!chunk?.data) return;
+      if (chunk.stream === 'stderr') {
+        term.write('\x1b[31m' + chunk.data + '\x1b[0m');
+      } else {
+        term.write(chunk.data);
+      }
+    });
+
     return () => {
       cleanupOutput();
       cleanupExit();
+      cleanupCmd();
     };
   }, []);
 
