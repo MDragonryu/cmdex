@@ -7,7 +7,7 @@ import Sidebar from './components/Sidebar';
 import CategoryEditor from './components/CategoryEditor';
 import VariablePrompt from './components/VariablePrompt';
 import HistoryPane from './components/HistoryPane';
-import TerminalComponent from './components/Terminal';
+import TerminalComponent, { type TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
 import CommandPalette from './components/CommandPalette';
@@ -153,6 +153,7 @@ function App() {
     const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<TerminalHandle>(null);
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -1454,6 +1455,15 @@ function App() {
                                     >
                                         ▼
                                     </button>
+                                    <button
+                                        className="terminal-clear-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={() => terminalRef.current?.clear()}
+                                        aria-label="Clear terminal"
+                                        title="Clear terminal (Ctrl+L)"
+                                    >
+                                        Clear
+                                    </button>
                                 </div>
                             )}
 
@@ -1465,6 +1475,7 @@ function App() {
                                 }
                             >
                                 <TerminalComponent
+                                    ref={terminalRef}
                                     monoFont={monoFont || 'JetBrains Mono, Fira Code, monospace'}
                                     isVisible={!terminalCollapsed}
                                 />

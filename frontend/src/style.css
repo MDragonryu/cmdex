@@ -1979,6 +1979,40 @@ textarea.inline-edit-input {
   border-color: var(--primary);
 }
 
+.terminal-clear-btn {
+  position: absolute;
+  right: 12px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  z-index: 11;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.terminal-divider:hover .terminal-clear-btn,
+.terminal-clear-btn:focus,
+.terminal-clear-btn:focus-visible,
+.terminal-divider:focus-within .terminal-clear-btn {
+  opacity: 1;
+}
+
+.terminal-clear-btn:hover,
+.terminal-clear-btn:focus-visible {
+  background: var(--accent);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
 .terminal-collapsed-rail {
   height: 8px;
   min-height: 8px;
