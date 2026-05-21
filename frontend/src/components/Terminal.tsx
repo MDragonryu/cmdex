@@ -6,7 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
 import { eventNames } from '../wails/events';
-import { Write } from '../../bindings/cmdex/terminalservice';
+import { Write, Resize } from '../../bindings/cmdex/terminalservice';
 
 interface TerminalComponentProps {
   monoFont: string;
@@ -84,10 +84,17 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     if (containerRef.current) {
       term.open(containerRef.current);
-      requestAnimationFrame(() => fitAddon.fit());
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        Resize(term.cols, term.rows).catch((err) => console.error('resize failed:', err));
+      });
     }
 
     terminalRef.current = term;
+
+    const resizeDisposable = term.onResize(({ cols, rows }) => {
+      Resize(cols, rows).catch((err) => console.error('resize failed:', err));
+    });
 
     const observer = new ResizeObserver(() => {
       fitAddonRef.current?.fit();
@@ -97,6 +104,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     }
 
     return () => {
+      resizeDisposable.dispose();
       observer.disconnect();
       if (terminalRef.current === term) {
         term.dispose();
@@ -147,9 +155,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           flushBuffer();
       };
 
-      term.onData(handleData);
+      const inputDisposable = term.onData(handleData);
 
       return () => {
+          inputDisposable.dispose();
           flushBuffer();
       };
   }, []);
