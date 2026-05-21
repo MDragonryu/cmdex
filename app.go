@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	db       *DB
-	executor *Executor
-	wailsApp *application.App
+	db          *DB
+	executor    *Executor
+	wailsApp    *application.App
+	terminalSvc *TerminalService
 )
 
 // App handles application lifecycle and settings window management.
