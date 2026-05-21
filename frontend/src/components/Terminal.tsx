@@ -25,8 +25,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
   useImperativeHandle(ref, () => ({
       clear: () => {
-          terminalRef.current?.clear();
-          Write('clear\r').catch((err) => console.error('clear failed:', err));
+          Write('\x0c').catch((err) => console.error('clear failed:', err));
       },
   }));
 
@@ -134,7 +133,6 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       if (!term) return;
 
       let keystrokeBuffer = '';
-      let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
       const flushBuffer = () => {
           if (keystrokeBuffer.length > 0) {
@@ -142,29 +140,16 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
               keystrokeBuffer = '';
               Write(batch).catch((err) => console.error('TerminalService.Write failed:', err));
           }
-          if (flushTimer) {
-              clearTimeout(flushTimer);
-              flushTimer = null;
-          }
       };
 
       const handleData = (data: string) => {
           keystrokeBuffer += data;
-          if (data === '\r') {
-              // Enter key — flush immediately
-              flushBuffer();
-          } else {
-              // Reset idle timer: flush after 50ms of inactivity
-              if (flushTimer) clearTimeout(flushTimer);
-              flushTimer = setTimeout(flushBuffer, 50);
-          }
+          flushBuffer();
       };
 
       term.onData(handleData);
 
       return () => {
-          // Cleanup: flush any remaining keystrokes and clear timer
-          if (flushTimer) clearTimeout(flushTimer);
           flushBuffer();
       };
   }, []);

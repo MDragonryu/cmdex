@@ -213,8 +213,15 @@ func (s *TerminalService) Write(data string) error {
 		return fmt.Errorf("terminal not started")
 	}
 
-	_, err := s.ptmx.Write([]byte(data))
-	return err
+	b := []byte(data)
+	for len(b) > 0 {
+		n, err := s.ptmx.Write(b)
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
 }
 
 func (s *TerminalService) Resize(cols, rows int) error {

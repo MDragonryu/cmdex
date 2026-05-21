@@ -1992,7 +1992,7 @@ textarea.inline-edit-input {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 0.15s, color 0.15s, background 0.15s;
   z-index: 11;
   line-height: 1;
