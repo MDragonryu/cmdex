@@ -73,7 +73,7 @@ func TestRunCommand_PTYWriteWithWorkingDir(t *testing.T) {
 		t.Fatalf("reading PTY pipe: %v", err)
 	}
 
-	expected := "cd '/Users/test' && echo hello && cd ~\n"
+	expected := "cd '/Users/test' && echo hello\n"
 	if string(written) != expected {
 		t.Errorf("RunCommand wrote %q, want %q", string(written), expected)
 	}
@@ -211,7 +211,7 @@ func TestRunCommand_PTYWriteMultilineScript(t *testing.T) {
 		t.Fatalf("reading PTY pipe: %v", err)
 	}
 
-	expected := "cd '/Users/test' && line1\nline2 && cd ~\n"
+	expected := "cd '/Users/test' && line1\nline2\n"
 	if string(written) != expected {
 		t.Errorf("RunCommand wrote %q, want %q", string(written), expected)
 	}

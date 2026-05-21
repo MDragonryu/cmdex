@@ -127,7 +127,7 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 
 	var cmdLine string
 	if s.hasExplicitWorkingDir(cmd) {
-		cmdLine = fmt.Sprintf("cd %s && %s && cd ~\n", shellQuoteDir(workingDir), resolvedScript)
+		cmdLine = fmt.Sprintf("cd %s && %s\n", shellQuoteDir(workingDir), resolvedScript)
 	} else {
 		cmdLine = resolvedScript + "\n"
 	}
