@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Terminal Integration
-status: verifying
-last_updated: "2026-05-19T05:47:40.170Z"
-last_activity: 2026-05-19
+status: executing
+last_updated: "2026-05-21T04:27:52.657Z"
+last_activity: 2026-05-21
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  completed_phases: 2
+  total_plans: 9
+  completed_plans: 8
+  percent: 50
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase 16 — pty-backend-foundation
+**Current focus:** Phase 18 — execution-integration-and-interactivity
 
 ## Current Position
 
-Phase: 16 (pty-backend-foundation) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-05-19
+Phase: 18 (execution-integration-and-interactivity) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-05-21
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Last activity: 2026-05-19
 | Phase 15-cross-platform-execution P01 | 5min | 3 tasks | 2 files |
 | Phase 15-cross-platform-execution P02 | 161 | 3 tasks | 1 files |
 | Phase 15-cross-platform-execution P03 | 185 | 3 tasks | 2 files |
+| Phase 18-execution-integration-and-interactivity P02 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,8 @@ Last activity: 2026-05-19
 - BuildFinalCommand is dead code (no callers) — kept as correct reference implementation
 - BuildDisplayCommand (actual user-facing function) already shebang-agnostic, no changes needed
 - ParseScriptBody now returns empty string for shebang-only inputs (no body present)
+- [Phase 18-execution-integration-and-interactivity]: forwardRef + useImperativeHandle pattern for exposing terminal.clear() to parent — Keeps clear logic encapsulated in terminal component; parent calls via terminalRef
+- [Phase 18-execution-integration-and-interactivity]: 50ms idle timeout for keystroke buffering — Mirrors the 16ms batching principle used in PTY readLoop
 
 ### Blockers/Concerns
 

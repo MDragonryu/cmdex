@@ -90,8 +90,8 @@
 <details>
 <summary>Plans (2 plans in 2 waves)</summary>
 
-- [ ] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
-- [ ] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
+- [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
+- [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
 
 </details>
 
@@ -132,7 +132,7 @@
 | 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
 | 16 | 3/3 | Complete   | 2026-05-19 |
 | 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
-| 18 | v2.0 Terminal Integration | 6 | Planned |
+| 18 | 2/2 | Complete   | 2026-05-21 |
 | 19 | v2.0 Terminal Integration | 4 | Pending |
 
 **Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
