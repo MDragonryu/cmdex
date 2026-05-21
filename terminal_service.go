@@ -147,6 +147,7 @@ func (s *TerminalService) monitorExit() {
 }
 
 func (s *TerminalService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	terminalSvc = s
 	return s.Start(80, 24)
 }
 

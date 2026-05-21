@@ -4,7 +4,16 @@ import (
 	"io"
 	"os"
 	"testing"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// testCleanup removes test data from the shared DB after the test.
+func testCleanup(t *testing.T, dbConn *DB, catID, cmdID string) {
+	t.Helper()
+	dbConn.conn.Exec(`DELETE FROM commands WHERE id = ?`, cmdID)
+	dbConn.conn.Exec(`DELETE FROM categories WHERE id = ?`, catID)
+}
 
 // TestRunCommand_PTYWriteWithWorkingDir verifies that RunCommand writes
 // a cd-sandwich-wrapped command line to the PTY when the command has
@@ -30,13 +39,17 @@ func TestRunCommand_PTYWriteWithWorkingDir(t *testing.T) {
 	}
 	defer initDB.Close()
 
-	catID := "test-cat-wd"
+	catID := "test-cat-wd-18"
+	cmdID := "test-cmd-wd-18"
+
+	// Clean up any previous test data.
+	testCleanup(t, initDB, catID, cmdID)
+
 	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, "TestWD")
 	if err != nil {
 		t.Fatalf("insert category: %v", err)
 	}
 
-	cmdID := "test-cmd-wd"
 	workingDirJSON := `{"darwin":"/Users/test"}`
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, ?, 0)`,
@@ -52,11 +65,6 @@ func TestRunCommand_PTYWriteWithWorkingDir(t *testing.T) {
 
 	svc := &ExecutionService{}
 	record := svc.RunCommand(cmdID, nil)
-
-	errMsg := record.Error
-	if errMsg != "" {
-		t.Logf("RunCommand Error: %s", errMsg)
-	}
 
 	// Read what was written to the PTY pipe.
 	w.Close() // signal EOF so ReadAll completes
@@ -80,7 +88,8 @@ func TestRunCommand_PTYWriteWithWorkingDir(t *testing.T) {
 }
 
 // TestRunCommand_PTYWriteNoWorkingDir verifies that RunCommand writes
-// just the resolved script (no cd sandwich) when there is no working dir.
+// just the resolved script (no cd sandwich) when the command has no
+// explicit working dir set and no global default.
 func TestRunCommand_PTYWriteNoWorkingDir(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -99,13 +108,23 @@ func TestRunCommand_PTYWriteNoWorkingDir(t *testing.T) {
 	}
 	defer initDB.Close()
 
-	catID := "test-cat-nowd"
+	// Clear the global default working dir for a clean test baseline.
+	settings, err := initDB.GetSettings()
+	if err == nil {
+		settings.DefaultWorkingDir = &OSPathMap{}
+		_ = initDB.SetSettings(settings)
+	}
+
+	catID := "test-cat-nowd-18"
+	cmdID := "test-cmd-nowd-18"
+	testCleanup(t, initDB, catID, cmdID)
+
 	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, "TestNoWD")
 	if err != nil {
 		t.Fatalf("insert category: %v", err)
 	}
 
-	cmdID := "test-cmd-nowd"
+	// Command with no working dir (empty OSPathMap).
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, '{}', 0)`,
 		cmdID, catID, "Test Cmd NoWD", "echo hello",
@@ -143,19 +162,24 @@ func TestRunCommand_PTYWriteNoWorkingDir(t *testing.T) {
 // TestRunCommand_GetCommandError verifies that RunCommand returns
 // an ExecutionRecord with an Error field when db.GetCommand fails.
 func TestRunCommand_GetCommandError(t *testing.T) {
-	// Swap in a nil DB so GetCommand will panic/error.
-	prevDB := db
-	db = nil
-	defer func() { db = prevDB }()
+	// Set up a real DB but query for a nonexistent command.
+	initDB, err := NewDB()
+	if err != nil {
+		t.Skipf("cannot open test DB: %v", err)
+	}
+	defer initDB.Close()
 
-	// Set up terminalSvc to a valid state so that's not the failure point.
 	prevTerminalSvc := terminalSvc
 	r, w, _ := os.Pipe()
 	terminalSvc = &TerminalService{ptmx: w}
 	defer func() { terminalSvc = prevTerminalSvc; w.Close(); r.Close() }()
 
+	prevDB := db
+	db = initDB
+	defer func() { db = prevDB }()
+
 	svc := &ExecutionService{}
-	record := svc.RunCommand("nonexistent-id", nil)
+	record := svc.RunCommand("nonexistent-id-for-test", nil)
 
 	if record.Error == "" {
 		t.Error("expected Error field to be set when GetCommand fails, got empty string")
@@ -179,13 +203,15 @@ func TestRunCommand_WriteError(t *testing.T) {
 	}
 	defer initDB.Close()
 
-	catID := "test-cat-writeerr"
+	catID := "test-cat-writeerr-18"
+	cmdID := "test-cmd-writeerr-18"
+	testCleanup(t, initDB, catID, cmdID)
+
 	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, "TestWriteErr")
 	if err != nil {
 		t.Fatalf("insert category: %v", err)
 	}
 
-	cmdID := "test-cmd-writeerr"
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, '{}', 0)`,
 		cmdID, catID, "Test Cmd WriteErr", "echo hello",
@@ -217,11 +243,9 @@ func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
 	defer func() { terminalSvc = prevTerminalSvc }()
 
 	s := &TerminalService{}
-	// simulate startup — in production this is called by Wails
-	_ = s.Start(80, 24)
+	_ = s.ServiceStartup(nil, application.ServiceOptions{})
 	defer s.Stop()
 
-	// After startup, the package-level var should be non-nil.
 	if terminalSvc == nil {
 		t.Error("terminalSvc should be non-nil after ServiceStartup, got nil")
 	}
@@ -251,7 +275,7 @@ func TestShellQuoteDir(t *testing.T) {
 }
 
 // TestRunCommand_NoHistoryPersistence verifies that RunCommand does NOT
-// call db.AddExecution — the record returned should not appear in history.
+// call db.AddExecution.
 func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 	initDB, err := NewDB()
 	if err != nil {
@@ -259,16 +283,17 @@ func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 	}
 	defer initDB.Close()
 
-	// Clear existing history.
 	_ = initDB.ClearExecutions()
 
-	catID := "test-cat-nohist"
+	catID := "test-cat-nohist-18"
+	cmdID := "test-cmd-nohist-18"
+	testCleanup(t, initDB, catID, cmdID)
+
 	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, "TestNoHist")
 	if err != nil {
 		t.Fatalf("insert category: %v", err)
 	}
 
-	cmdID := "test-cmd-nohist"
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, '{}', 0)`,
 		cmdID, catID, "Test Cmd NoHist", "echo hello",
@@ -277,7 +302,6 @@ func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 		t.Fatalf("insert command: %v", err)
 	}
 
-	// Set up PTY pipe
 	r, w, _ := os.Pipe()
 	defer r.Close()
 	defer w.Close()
@@ -293,7 +317,6 @@ func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 	svc := &ExecutionService{}
 	svc.RunCommand(cmdID, nil)
 
-	// Check no execution record was persisted.
 	records, err := initDB.GetExecutions()
 	if err != nil {
 		t.Fatalf("GetExecutions failed: %v", err)

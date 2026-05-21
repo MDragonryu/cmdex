@@ -90,7 +90,26 @@ func (s *ExecutionService) GetVariables(commandID string) []VariablePrompt {
 	return prompts
 }
 
-// RunCommand executes a command with resolved variables and streams output via event.
+// hasExplicitWorkingDir returns true when either the command or the global
+// settings define a working directory for the current OS. If neither have
+// one, the shell stays in its current (home) directory — no cd sandwich needed.
+func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
+	if cmd.WorkingDir.GetCurrentOS() != "" {
+		return true
+	}
+	settings, err := db.GetSettings()
+	if err != nil {
+		return false
+	}
+	if settings.DefaultWorkingDir != nil {
+		return settings.DefaultWorkingDir.GetCurrentOS() != ""
+	}
+	return false
+}
+
+// RunCommand writes the resolved command to the PTY terminal for
+// in-terminal execution. No subprocess or temp-script is used;
+// output appears via the existing pty-output event stream.
 func (s *ExecutionService) RunCommand(commandID string, variables map[string]string) ExecutionRecord {
 	cmd, err := db.GetCommand(commandID)
 	if err != nil {
@@ -102,32 +121,32 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	}
 
 	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	finalCmd := BuildDisplayCommand(cmd.ScriptContent, variables)
 	workingDir := s.resolveWorkingDir(cmd)
 
-	result := executor.ExecuteScript(resolvedScript, workingDir, func(chunk OutputChunk) {
-		wailsApp.Event.Emit(eventNames.PtyOutput, map[string]interface{}{
-			"data": chunk.Data,
-		})
-	})
-
-	record := ExecutionRecord{
-		ID:            uuid.New().String(),
-		CommandID:     commandID,
-		ScriptContent: cmd.ScriptContent,
-		FinalCmd:      finalCmd,
-		Output:        result.Output,
-		Error:         result.Error,
-		ExitCode:      result.ExitCode,
-		WorkingDir:    workingDir,
-		ExecutedAt:    time.Now(),
+	var cmdLine string
+	if s.hasExplicitWorkingDir(cmd) {
+		cmdLine = fmt.Sprintf("cd %s && %s && cd ~\n", shellQuoteDir(workingDir), resolvedScript)
+	} else {
+		cmdLine = resolvedScript + "\n"
 	}
 
-	if err := db.AddExecution(record); err != nil {
-		fmt.Printf("failed to persist execution record: %v\n", err)
+	if err := terminalSvc.Write(cmdLine); err != nil {
+		return ExecutionRecord{
+			ID:         uuid.New().String(),
+			CommandID:  commandID,
+			FinalCmd:   cmdLine,
+			Error:      fmt.Sprintf("terminal write failed: %v", err),
+			ExitCode:   -1,
+			ExecutedAt: time.Now(),
+		}
 	}
 
-	return record
+	return ExecutionRecord{
+		ID:         uuid.New().String(),
+		CommandID:  commandID,
+		FinalCmd:   cmdLine,
+		ExecutedAt: time.Now(),
+	}
 }
 
 // RunInTerminal opens the command in the system terminal.
