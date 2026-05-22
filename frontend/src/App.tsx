@@ -1252,6 +1252,14 @@ function App() {
             if (prev) handleSelectTab(prev.id);
         },
 
+        'ctrl+`': () => {
+            if (terminalCollapsed) {
+                expandTerminal();
+            } else {
+                collapseTerminal();
+            }
+        },
+
         [`${cmdOrCtrl}+shift+backspace`]: () => {
             if (activeTabId && activeDirty) {
                 handleDiscardTab(activeTabId);

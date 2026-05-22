@@ -67,6 +67,7 @@ export const SHORTCUTS = {
   lastTab:        { keys: ['cmd', '0'] },
   nextTab:        { keys: ['ctrl', 'tab'] },
   prevTab:        { keys: ['ctrl', 'shift', 'tab'] },
+  toggleTerminal: { keys: ['ctrl', '`'] },
 } as const satisfies Record<string, { keys: readonly string[] }>;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
