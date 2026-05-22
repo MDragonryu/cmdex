@@ -92,7 +92,7 @@
 
 - [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
 - [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
-- [ ] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
+- [x] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
 
 </details>
 
@@ -100,7 +100,7 @@
 
 ## Phase 19: Terminal Polish
 
-**Goal:** Terminal theme syncs with Cmdex themes, font matches app font, copy/paste works per-platform, search is available, and the terminal feels native.
+**Goal:** Terminal theme syncs with Cmdex themes, font matches app font, copy/paste works per-platform, and the terminal feels native. (SearchAddon deferred per D-09 to a future phase.)
 
 **Requirements:** POL-01, POL-02, POL-03, POL-04
 
@@ -109,13 +109,13 @@
 2. Terminal font family updates when user changes font in Settings
 3. Cmd+C / Ctrl+Shift+C copies selected text from terminal
 4. Cmd+V / Ctrl+Shift+V pastes clipboard text into terminal
-5. Ctrl+F opens search in terminal scrollback buffer (SearchAddon)
+
+**Plans:** 1 plan in 1 wave
 
 <details>
-<summary>Plans (TBD by /gsd-plan-phase)</summary>
+<summary>Plans (Wave 1)</summary>
 
-- 19-01: Theme sync — derive xterm ITheme from Cmdex CSS variables, apply on theme change
-- 19-02: Font, copy/paste, and SearchAddon integration
+- [ ] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
 
 </details>
 
@@ -133,8 +133,8 @@
 | 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
 | 16 | 3/3 | Complete   | 2026-05-19 |
 | 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
-| 18 | 2/3 | Gap closure   | 2026-05-21 |
-| 19 | v2.0 Terminal Integration | 4 | Pending |
+| 18 | 3/3 | Complete   | 2026-05-21 |
+| 19 | v2.0 Terminal Integration | 4 | Planned |
 
 **Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
 
