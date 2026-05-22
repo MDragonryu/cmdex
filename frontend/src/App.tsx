@@ -1478,6 +1478,7 @@ function App() {
                                     ref={terminalRef}
                                     monoFont={monoFont || 'JetBrains Mono, Fira Code, monospace'}
                                     isVisible={!terminalCollapsed}
+                                    theme={theme}
                                 />
                                 {terminalCollapsed && (
                                     <button

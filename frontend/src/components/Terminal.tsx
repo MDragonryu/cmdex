@@ -11,6 +11,7 @@ import { Write, Resize } from '../../bindings/cmdex/terminalservice';
 interface TerminalComponentProps {
   monoFont: string;
   isVisible: boolean;
+  theme: string;
 }
 
 export interface TerminalHandle {
@@ -18,10 +19,21 @@ export interface TerminalHandle {
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ monoFont, isVisible }, ref) => {
+    ({ monoFont, isVisible, theme }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+
+    function hexToRgba(hex: string, alpha: number): string {
+        hex = hex.replace('#', '');
+        if (hex.length === 3) {
+            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
 
   useImperativeHandle(ref, () => ({
       clear: () => {
@@ -113,6 +125,27 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       }
     };
   }, [monoFont]);
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+
+    const styles = getComputedStyle(document.documentElement);
+    const background = styles.getPropertyValue('--background').trim();
+    const foreground = styles.getPropertyValue('--foreground').trim();
+    const primary = styles.getPropertyValue('--primary').trim();
+    const cursorAccent = background;
+    const selectionBg = hexToRgba(primary, 0.4);
+
+    term.options.theme = {
+        ...term.options.theme,
+        background,
+        foreground,
+        cursor: primary,
+        cursorAccent,
+        selectionBackground: selectionBg,
+    };
+  }, [theme]);
 
   useEffect(() => {
     const term = terminalRef.current;
