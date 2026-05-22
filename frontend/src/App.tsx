@@ -918,9 +918,6 @@ function App() {
 
         try {
             await RunCommand(commandId, variables);
-            if (execTabId === activeTabIdRef.current) {
-                toast.success(t('toast.commandSuccess'));
-            }
         } catch (err) {
             if (execTabId === activeTabIdRef.current) {
                 toast.error(t('toast.commandFailed', { code: -1 }));
