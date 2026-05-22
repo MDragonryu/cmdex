@@ -23,6 +23,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const isFirstMountRef = useRef(true);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -42,6 +43,17 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   }));
 
   useEffect(() => {
+    const skipTransition = isFirstMountRef.current;
+    if (isFirstMountRef.current) {
+        isFirstMountRef.current = false;
+    }
+
+    const container = containerRef.current;
+    if (!skipTransition && container) {
+        container.style.opacity = '0';
+        container.style.transition = 'opacity var(--transition-fast)';
+    }
+
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -99,6 +111,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       requestAnimationFrame(() => {
         fitAddon.fit();
         Resize(term.cols, term.rows).catch((err) => console.error('resize failed:', err));
+        if (!skipTransition) {
+            containerRef.current!.style.opacity = '1';
+        }
       });
     }
 
