@@ -915,6 +915,7 @@ function App() {
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         setIsExecuting(true);
+        expandTerminal();
 
         try {
             await RunCommand(commandId, variables);
