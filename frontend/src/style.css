@@ -2084,12 +2084,13 @@ textarea.inline-edit-input {
 }
 
 .terminal-container .xterm-viewport {
-  scrollbar-width: auto;
+  scrollbar-width: thin;
   overflow-x: auto;
 }
 
 .terminal-container .xterm-viewport::-webkit-scrollbar {
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 .terminal-container .xterm-viewport::-webkit-scrollbar-track {
@@ -2097,8 +2098,12 @@ textarea.inline-edit-input {
 }
 
 .terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ========== Variable Prompt (fill mode) ========== */

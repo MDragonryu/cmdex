@@ -156,6 +156,7 @@ function App() {
   const terminalRef = useRef<TerminalHandle>(null);
     const lastCommandRef = useRef<string>('');
     const lastOutputRef = useRef<string>('');
+    const isOutputBuffering = useRef(false);
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -562,6 +563,7 @@ function App() {
             if (event?.data) {
                 lastCommandRef.current = event.data;
                 lastOutputRef.current = '';
+                isOutputBuffering.current = true;
             }
         });
         return cleanup;
@@ -570,6 +572,7 @@ function App() {
     useEffect(() => {
         if (!eventsInitialized) return;
         const cleanup = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
+            if (!isOutputBuffering.current) return;
             const chunk = event?.data?.data;
             if (chunk) {
                 lastOutputRef.current += chunk;
