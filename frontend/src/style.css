@@ -1913,6 +1913,7 @@ textarea.inline-edit-input {
   flex: 1;
   overflow: hidden;
   opacity: 1;
+  background: var(--background);
 }
 
 .terminal-divider {
