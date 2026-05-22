@@ -145,21 +145,26 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     const term = terminalRef.current;
     if (!term) return;
 
-    const styles = getComputedStyle(document.documentElement);
-    const background = styles.getPropertyValue('--background').trim();
-    const foreground = styles.getPropertyValue('--foreground').trim();
-    const primary = styles.getPropertyValue('--primary').trim();
-    const cursorAccent = background;
-    const selectionBg = hexToRgba(primary, 0.4);
+    requestAnimationFrame(() => {
+        const current = terminalRef.current;
+        if (!current) return;
 
-    term.options.theme = {
-        ...term.options.theme,
-        background,
-        foreground,
-        cursor: primary,
-        cursorAccent,
-        selectionBackground: selectionBg,
-    };
+        const styles = getComputedStyle(document.documentElement);
+        const background = styles.getPropertyValue('--background').trim();
+        const foreground = styles.getPropertyValue('--foreground').trim();
+        const primary = styles.getPropertyValue('--primary').trim();
+        const cursorAccent = background;
+        const selectionBg = hexToRgba(primary, 0.4);
+
+        current.options.theme = {
+            ...current.options.theme,
+            background,
+            foreground,
+            cursor: primary,
+            cursorAccent,
+            selectionBackground: selectionBg,
+        };
+    });
   }, [theme]);
 
   useEffect(() => {
