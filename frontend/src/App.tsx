@@ -1473,42 +1473,6 @@ function App() {
                                         ▼
                                     </button>
                                     <button
-                                        className="terminal-copy-cmd-btn"
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => {
-                                            const cmd = lastCommandRef.current;
-                                            if (cmd) {
-                                                navigator.clipboard.writeText(cmd).then(() => {
-                                                    toast.success('Command copied');
-                                                }).catch(() => {
-                                                    toast.error('Failed to copy');
-                                                });
-                                            }
-                                        }}
-                                        aria-label="Copy last command"
-                                        title="Copy last executed command"
-                                    >
-                                        Copy Cmd
-                                    </button>
-                                    <button
-                                        className="terminal-copy-out-btn"
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => {
-                                            const sel = terminalRef.current?.getSelection() || '';
-                                            if (sel) {
-                                                navigator.clipboard.writeText(sel).then(() => {
-                                                    toast.success('Output copied');
-                                                }).catch(() => {
-                                                    toast.error('Failed to copy');
-                                                });
-                                            }
-                                        }}
-                                        aria-label="Copy terminal selection"
-                                        title="Copy selected terminal text"
-                                    >
-                                        Copy Out
-                                    </button>
-                                    <button
                                         className="terminal-clear-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onClick={() => terminalRef.current?.clear()}
@@ -1527,6 +1491,44 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
+                                {!terminalCollapsed && (
+                                    <>
+                                        <button
+                                            className="term-copy-cmd-btn"
+                                            onClick={() => {
+                                                const cmd = lastCommandRef.current;
+                                                if (cmd) {
+                                                    navigator.clipboard.writeText(cmd).then(() => {
+                                                        toast.success('Command copied');
+                                                    }).catch(() => {
+                                                        toast.error('Failed to copy');
+                                                    });
+                                                }
+                                            }}
+                                            aria-label="Copy last command"
+                                            title="Copy last executed command"
+                                        >
+                                            ⎘
+                                        </button>
+                                        <button
+                                            className="term-copy-out-btn"
+                                            onClick={() => {
+                                                const sel = terminalRef.current?.getSelection() || '';
+                                                if (sel) {
+                                                    navigator.clipboard.writeText(sel).then(() => {
+                                                        toast.success('Output copied');
+                                                    }).catch(() => {
+                                                        toast.error('Failed to copy');
+                                                    });
+                                                }
+                                            }}
+                                            aria-label="Copy terminal selection"
+                                            title="Copy selected terminal text"
+                                        >
+                                            ❐
+                                        </button>
+                                    </>
+                                )}
                                 <TerminalComponent
                                     ref={terminalRef}
                                     monoFont={monoFont || 'JetBrains Mono, Fira Code, monospace'}

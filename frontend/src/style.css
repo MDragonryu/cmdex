@@ -1907,6 +1907,51 @@ textarea.inline-edit-input {
   overflow: hidden;
   min-height: 0;
   flex-shrink: 0;
+  position: relative;
+}
+
+.term-copy-cmd-btn,
+.term-copy-out-btn {
+  position: absolute;
+  top: 4px;
+  height: 20px;
+  width: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+  z-index: 20;
+  line-height: 1;
+  padding: 0;
+}
+
+.term-copy-cmd-btn {
+  right: 36px;
+}
+
+.term-copy-out-btn {
+  right: 8px;
+}
+
+.terminal-pane:hover .term-copy-cmd-btn,
+.terminal-pane:hover .term-copy-out-btn,
+.term-copy-cmd-btn:focus-visible,
+.term-copy-out-btn:focus-visible {
+  opacity: 1;
+}
+
+.term-copy-cmd-btn:hover,
+.term-copy-out-btn:hover {
+  background: var(--accent);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .terminal-container {
@@ -1976,54 +2021,6 @@ textarea.inline-edit-input {
 
 .terminal-collapse-btn:hover,
 .terminal-collapse-btn:focus-visible {
-  background: var(--accent);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-
-.terminal-copy-cmd-btn,
-.terminal-copy-out-btn {
-  position: absolute;
-  height: 18px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0.55;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
-  z-index: 11;
-  line-height: 1;
-  padding: 0 6px;
-}
-
-.terminal-copy-cmd-btn {
-  right: 100px;
-}
-
-.terminal-copy-out-btn {
-  right: 64px;
-}
-
-.terminal-divider:hover .terminal-copy-cmd-btn,
-.terminal-copy-cmd-btn:focus,
-.terminal-copy-cmd-btn:focus-visible,
-.terminal-divider:focus-within .terminal-copy-cmd-btn,
-.terminal-divider:hover .terminal-copy-out-btn,
-.terminal-copy-out-btn:focus,
-.terminal-copy-out-btn:focus-visible,
-.terminal-divider:focus-within .terminal-copy-out-btn {
-  opacity: 1;
-}
-
-.terminal-copy-cmd-btn:hover,
-.terminal-copy-cmd-btn:focus-visible,
-.terminal-copy-out-btn:hover,
-.terminal-copy-out-btn:focus-visible {
   background: var(--accent);
   color: var(--primary);
   border-color: var(--primary);
