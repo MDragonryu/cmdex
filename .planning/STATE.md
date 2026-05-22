@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Terminal Integration
-status: verifying
-last_updated: "2026-05-22T03:53:58.620Z"
-last_activity: 2026-05-22
+status: executing
+last_updated: "2026-05-22T07:56:32.315Z"
+last_activity: 2026-05-22 -- Phase 20 execution started
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
-  total_plans: 11
+  total_plans: 12
   completed_plans: 11
-  percent: 100
+  percent: 80
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase 19 — terminal-polish
+**Current focus:** Phase 20 — terminal-copy-buttons
 
 ## Current Position
 
-Phase: 19 (terminal-polish) — EXECUTING
+Phase: 20 (terminal-copy-buttons) — EXECUTING
 Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-05-22
+Status: Executing Phase 20
+Last activity: 2026-05-22 -- Phase 20 execution started
 
 ## Performance Metrics
 

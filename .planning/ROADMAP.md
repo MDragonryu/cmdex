@@ -121,6 +121,29 @@
 
 ---
 
+## Phase 20: Terminal Copy Buttons
+
+**Goal:** Add copy buttons to the terminal toolbar — one to copy the last executed command text, one to copy selected terminal output.
+
+**Requirements:** CPY-01, CPY-02
+
+**Success criteria:**
+1. Copy Command button copies the full resolved command text (including `cd` working directory prefix) to clipboard
+2. Copy Output button copies currently selected terminal text to clipboard, or all visible output if nothing is selected
+3. Buttons are accessible in the terminal toolbar alongside Clear
+4. Clipboard write uses `navigator.clipboard.writeText` with a toast confirmation
+
+**Plans:** 1 plan in 1 wave
+
+<details>
+<summary>Plans (Wave 1)</summary>
+
+- [ ] 20-01-PLAN.md — Emit cmd-executing event from Go, add Copy Command + Copy Output buttons to terminal toolbar
+
+</details>
+
+---
+
 ## Progress
 
 | Phase | Milestone | Requirements | Status |
@@ -135,6 +158,7 @@
 | 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
 | 18 | 3/3 | Complete   | 2026-05-21 |
 | 19 | 1/1 | Complete   | 2026-05-22 |
+| 20 | 0/1 | Planned |
 
 **Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
 
