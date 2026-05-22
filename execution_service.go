@@ -132,6 +132,9 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		cmdLine = resolvedScript + "\n"
 	}
 
+	if wailsApp != nil {
+		wailsApp.Event.Emit(eventNames.CmdExecuting, cmdLine)
+	}
 	if err := terminalSvc.Write(cmdLine); err != nil {
 		return ExecutionRecord{
 			ID:         uuid.New().String(),

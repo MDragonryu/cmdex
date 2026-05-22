@@ -8,6 +8,7 @@ export const eventNames = {
     settingsWindowClosing: 'settings-window-closing',
     ptyOutput: 'pty-output',
     ptyExit: 'pty-exit',
+    cmdExecuting: 'cmd-executing',
 };
 
 export async function initEventNames(): Promise<void> {
@@ -21,6 +22,7 @@ export async function initEventNames(): Promise<void> {
         eventNames.settingsWindowClosing = names.settingsWindowClosing;
         eventNames.ptyOutput = names.ptyOutput;
         eventNames.ptyExit = names.ptyExit;
+        eventNames.cmdExecuting = names.cmdExecuting;
     } catch (err) {
         console.error('Failed to init event names:', err);
         toast.error('Failed to initialize events. Using fallback event names.');
