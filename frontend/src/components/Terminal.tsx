@@ -16,6 +16,7 @@ interface TerminalComponentProps {
 
 export interface TerminalHandle {
     clear: () => void;
+    getSelection: () => string;
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
@@ -40,6 +41,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       clear: () => {
           Write('\x0c').catch((err) => console.error('clear failed:', err));
       },
+      getSelection: () => terminalRef.current?.getSelection() || '',
   }));
 
   useEffect(() => {

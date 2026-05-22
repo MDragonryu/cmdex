@@ -154,6 +154,7 @@ function App() {
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<TerminalHandle>(null);
+    const lastCommandRef = useRef<string>('');
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -549,6 +550,16 @@ function App() {
                 } catch {
                     // Do not overwrite existing customThemes on parse failure
                 }
+            }
+        });
+        return cleanup;
+    }, [eventsInitialized]);
+
+    useEffect(() => {
+        if (!eventsInitialized) return;
+        const cleanup = Events.On(eventNames.cmdExecuting, (event: { data: string }) => {
+            if (event?.data) {
+                lastCommandRef.current = event.data;
             }
         });
         return cleanup;
@@ -1460,6 +1471,42 @@ function App() {
                                         aria-label="Collapse terminal panel"
                                     >
                                         ▼
+                                    </button>
+                                    <button
+                                        className="terminal-copy-cmd-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={() => {
+                                            const cmd = lastCommandRef.current;
+                                            if (cmd) {
+                                                navigator.clipboard.writeText(cmd).then(() => {
+                                                    toast.success('Command copied');
+                                                }).catch(() => {
+                                                    toast.error('Failed to copy');
+                                                });
+                                            }
+                                        }}
+                                        aria-label="Copy last command"
+                                        title="Copy last executed command"
+                                    >
+                                        Copy Cmd
+                                    </button>
+                                    <button
+                                        className="terminal-copy-out-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={() => {
+                                            const sel = terminalRef.current?.getSelection() || '';
+                                            if (sel) {
+                                                navigator.clipboard.writeText(sel).then(() => {
+                                                    toast.success('Output copied');
+                                                }).catch(() => {
+                                                    toast.error('Failed to copy');
+                                                });
+                                            }
+                                        }}
+                                        aria-label="Copy terminal selection"
+                                        title="Copy selected terminal text"
+                                    >
+                                        Copy Out
                                     </button>
                                     <button
                                         className="terminal-clear-btn"
