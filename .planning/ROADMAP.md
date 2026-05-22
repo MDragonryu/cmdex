@@ -115,7 +115,7 @@
 <details>
 <summary>Plans (Wave 1)</summary>
 
-- [ ] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
+- [x] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
 
 </details>
 
@@ -134,7 +134,7 @@
 | 16 | 3/3 | Complete   | 2026-05-19 |
 | 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
 | 18 | 3/3 | Complete   | 2026-05-21 |
-| 19 | v2.0 Terminal Integration | 4 | Planned |
+| 19 | 1/1 | Complete   | 2026-05-22 |
 
 **Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
 
