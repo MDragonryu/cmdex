@@ -153,10 +153,7 @@ function App() {
     const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<TerminalHandle>(null);
-    const lastCommandRef = useRef<string>('');
-    const lastOutputRef = useRef<string>('');
-    const isOutputBuffering = useRef(false);
+    const terminalRef = useRef<TerminalHandle>(null);
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -556,31 +553,6 @@ function App() {
         });
         return cleanup;
     }, [eventsInitialized]);
-
-    useEffect(() => {
-        if (!eventsInitialized) return;
-        const cleanup = Events.On(eventNames.cmdExecuting, (event: { data: string }) => {
-            if (event?.data) {
-                lastCommandRef.current = event.data;
-                lastOutputRef.current = '';
-                isOutputBuffering.current = true;
-            }
-        });
-        return cleanup;
-    }, [eventsInitialized]);
-
-    useEffect(() => {
-        if (!eventsInitialized) return;
-        const cleanup = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
-            if (!isOutputBuffering.current) return;
-            const chunk = event?.data?.data;
-            if (chunk) {
-                lastOutputRef.current += chunk;
-            }
-        });
-        return cleanup;
-    }, [eventsInitialized]);
-
 
     const updateDraft = useCallback((tabId: string, partial: Partial<TabDraft>) => {
         setTabDrafts((prev) => {
@@ -1495,15 +1467,15 @@ function App() {
                                         aria-label="Clear terminal"
                                         title="Clear terminal (Ctrl+L)"
                                     >
-                                        Clear
+                                        {t('common.clear')}
                                     </button>
                                     <button
                                         className="terminal-copy-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onClick={() => {
-                                            const out = lastOutputRef.current.trim();
-                                            if (out) {
-                                                navigator.clipboard.writeText(out).then(() => {
+                                            const output = terminalRef.current?.getLastOutput() || '';
+                                            if (output) {
+                                                navigator.clipboard.writeText(output).then(() => {
                                                     toast.success('Output copied');
                                                 }).catch(() => {
                                                     toast.error('Failed to copy');
@@ -1513,7 +1485,7 @@ function App() {
                                         aria-label="Copy terminal output"
                                         title="Copy last command output"
                                     >
-                                        Copy
+                                        {t('common.copyLastOutput')}
                                     </button>
                                 </div>
                             )}

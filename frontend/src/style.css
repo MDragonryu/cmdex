@@ -509,7 +509,7 @@ body {
   font-size: var(--density-font-size-base, 13px);
 }
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
@@ -2083,27 +2083,40 @@ textarea.inline-edit-input {
   min-height: 0;
 }
 
-.terminal-container .xterm-viewport {
-  scrollbar-width: thin !important;
-  scrollbar-color: var(--scrollbar-thumb) transparent !important;
-  overflow-x: auto;
+/* 1. Target the vertical track container */
+.terminal-container .scrollbar.vertical {
+  width: 6px !important;              /* Matches your previous width */
+  background: transparent !important; /* Matches your previous track background */
 }
 
-.terminal-container .xterm-viewport::-webkit-scrollbar {
-  width: 4px !important;
-  height: 4px !important;
+/* 2. Target the draggable scroll handle/slider */
+.terminal-container .scrollbar.vertical .slider {
+  width: 6px !important;              /* Match the track width exactly */
+  border-radius: 6px !important;       /* Keeps your rounded edges */
+  background: var(--scrollbar-thumb) !important; /* Uses your custom thumb variable */
+  transition: background 0.15s ease;
 }
 
-.terminal-container .xterm-viewport::-webkit-scrollbar-track {
+/* 3. Target the hover and active states */
+.terminal-container .scrollbar.vertical .slider:hover,
+.terminal-container .scrollbar.vertical .slider.active {
+  background: var(--scrollbar-thumb-hover) !important; /* Uses your custom hover variable */
+}
+
+/* 4. Optional: Handle horizontal scrollbar if your terminal uses it */
+.terminal-container .scrollbar.horizontal {
+  height: 6px !important;
   background: transparent !important;
 }
 
-.terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+.terminal-container .scrollbar.horizontal .slider {
+  height: 6px !important;
+  border-radius: 6px !important;
   background: var(--scrollbar-thumb) !important;
-  border-radius: 4px !important;
 }
 
-.terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+.terminal-container .scrollbar.horizontal .slider:hover,
+.terminal-container .scrollbar.horizontal .slider.active {
   background: var(--scrollbar-thumb-hover) !important;
 }
 
