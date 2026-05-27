@@ -17,6 +17,7 @@ interface TerminalComponentProps {
 export interface TerminalHandle {
     clear: () => void;
     getSelection: () => string;
+    getLastOutput: () => string;
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
@@ -42,6 +43,93 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           Write('\x0c').catch((err) => console.error('clear failed:', err));
       },
       getSelection: () => terminalRef.current?.getSelection() || '',
+      getLastOutput: () => {
+          const buffer = terminalRef.current?.buffer.active;
+          if (!buffer) return '';
+
+          const stripAnsi = (str: string) => str
+              .replace(/\x1B\[[0-9;]*[mGKHFJA-Za-z]/g, '')
+              .replace(/\x1B\][^\x07]*\x07/g, '')
+              .replace(/\r/g, '');
+
+          const promptRegex = /[$#%❯>➤λ→⟩»◇](\s|$)/;
+
+          const isLineContent = (i: number): boolean => {
+              const l = buffer.getLine(i);
+              if (!l) return false;
+              if (l.isWrapped) {
+                  let p = i - 1;
+                  while (p >= 0 && buffer.getLine(p)?.isWrapped) p--;
+                  if (p >= 0) {
+                      const pl = buffer.getLine(p);
+                      if (pl && promptRegex.test(pl.translateToString(true).trim())) return false;
+                  }
+              }
+              return stripAnsi(l.translateToString(true)).trim().length > 0;
+          };
+
+          const cursorPos = buffer.cursorY + buffer.baseY;
+          let promptIdx = -1;
+          let prevPromptIdx = -1;
+          let scanFrom = cursorPos;
+
+          while (scanFrom >= 0) {
+              let found = -1;
+              for (let i = scanFrom; i >= 0; i--) {
+                  const line = buffer.getLine(i);
+                  if (!line) continue;
+                  if (promptRegex.test(line.translateToString(true).trim())) {
+                      found = i;
+                      break;
+                  }
+              }
+
+              if (found === -1) break;
+
+              if (promptIdx === -1) {
+                  promptIdx = found;
+                  scanFrom = found - 1;
+                  continue;
+              }
+
+              let hasContent = false;
+              for (let i = found + 1; i < promptIdx; i++) {
+                  if (isLineContent(i)) { hasContent = true; break; }
+              }
+
+              if (hasContent) {
+                  prevPromptIdx = found;
+                  break;
+              }
+
+              promptIdx = found;
+              scanFrom = found - 1;
+          }
+
+          if (promptIdx === -1) return '';
+
+          const outputStart = prevPromptIdx !== -1 ? prevPromptIdx + 1 : promptIdx + 1;
+          const outputEnd = prevPromptIdx !== -1 ? promptIdx - 1 : cursorPos;
+
+          const outputLines: string[] = [];
+          for (let i = outputStart; i <= outputEnd; i++) {
+              const line = buffer.getLine(i);
+              if (!line) continue;
+              if (line.isWrapped) {
+                  let parent = i - 1;
+                  while (parent >= 0 && buffer.getLine(parent)?.isWrapped) parent--;
+                  if (parent >= 0) {
+                      const parentLine = buffer.getLine(parent);
+                      if (parentLine && promptRegex.test(parentLine.translateToString(true).trim())) continue;
+                  }
+              }
+              const text = line.translateToString(true);
+              const stripped = stripAnsi(text);
+              if (stripped.length > 0) outputLines.push(stripped);
+          }
+
+          return outputLines.join('\n').trim();
+      },
   }));
 
   useEffect(() => {
@@ -207,25 +295,36 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       if (!term) return;
 
       let keystrokeBuffer = '';
+      let flushScheduled = false;
 
       const flushBuffer = () => {
-          if (keystrokeBuffer.length > 0) {
-              const batch = keystrokeBuffer;
-              keystrokeBuffer = '';
-              Write(batch).catch((err) => console.error('TerminalService.Write failed:', err));
-          }
+        flushScheduled = false;
+        if (keystrokeBuffer.length > 0) {
+          const batch = keystrokeBuffer;
+          keystrokeBuffer = '';
+          Write(batch).catch((err) =>
+            console.error('TerminalService.Write failed:', err)
+          );
+        }
       };
 
       const handleData = (data: string) => {
-          keystrokeBuffer += data;
-          flushBuffer();
+          // Accumulate keystrokes
+        keystrokeBuffer += data;
+
+        // Schedule a single flush on the next microtask tick,
+        // so multiple same-tick keystrokes are sent as one batch
+        if (!flushScheduled) {
+          flushScheduled = true;
+          Promise.resolve().then(flushBuffer);
+        }
       };
 
       const inputDisposable = term.onData(handleData);
 
       return () => {
-          inputDisposable.dispose();
-          flushBuffer();
+        inputDisposable.dispose();
+        flushBuffer();
       };
   }, []);
 
@@ -233,7 +332,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     <div
       ref={containerRef}
       className="terminal-container"
-      style={{ display: isVisible ? 'flex' : 'none' }}
+      style={{ display: isVisible ? '' : 'none' }}
     />
   );
   }
