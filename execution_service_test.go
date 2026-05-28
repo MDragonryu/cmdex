@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -47,7 +48,8 @@ func testDBCreateCommand(t *testing.T, catID, cmdID, categoryName, cmdTitle, scr
 }
 
 func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
-	_, cleanup := testDBCreateCommand(t, "test-cat-wd-18", "test-cmd-wd-18", "TestWD", "Test Cmd WD", "echo hello", `{"darwin":"/Users/test"}`)
+	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
+	_, cleanup := testDBCreateCommand(t, "test-cat-wd-18", "test-cmd-wd-18", "TestWD", "Test Cmd WD", "echo hello", workingDirJSON)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -93,7 +95,8 @@ func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 }
 
 func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
-	_, cleanup := testDBCreateCommand(t, "test-cat-ml-18", "test-cmd-ml-18", "TestML", "Test Cmd ML", "line1\nline2", `{"darwin":"/Users/test"}`)
+	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
+	_, cleanup := testDBCreateCommand(t, "test-cat-ml-18", "test-cmd-ml-18", "TestML", "Test Cmd ML", "line1\nline2", workingDirJSON)
 	defer cleanup()
 
 	svc := &ExecutionService{}

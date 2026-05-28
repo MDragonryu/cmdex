@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
 import { eventNames } from '../wails/events';
 import { Write, Resize, Start, Clear } from '../../bindings/cmdex/terminalservice';
+import { toast } from 'sonner';
 
 interface TerminalComponentProps {
   isVisible: boolean;
@@ -40,7 +41,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
   useImperativeHandle(ref, () => ({
       clear: () => {
-        Clear().catch((err) => console.error('clear failed:', err));
+        Clear().catch((err) => {
+          console.error('clear failed:', err);
+          toast.error('Terminal clear failed');
+        });
         terminalRef.current?.clear();
       },
       getSelection: () => terminalRef.current?.getSelection() || '',
@@ -209,7 +213,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       term.open(containerRef.current);
       requestAnimationFrame(() => {
         fitAddon.fit();
-        Resize(term.cols, term.rows).catch((err) => console.error('resize failed:', err));
+        Resize(term.cols, term.rows).catch((err) => {
+          console.error('resize failed:', err);
+          toast.error('Terminal resize failed');
+        });
         if (!skipTransition) {
             containerRef.current!.style.opacity = '1';
         }
@@ -219,13 +226,17 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     terminalRef.current = term;
 
     const inputDisposable = term.onData((data) => {
-      Write(data).catch((err) =>
-        console.error('TerminalService.Write failed:', err)
-      );
+      Write(data).catch((err) => {
+        console.error('TerminalService.Write failed:', err);
+        toast.error('Terminal write failed');
+      });
     });
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
-      Resize(cols, rows).catch((err) => console.error('resize failed:', err));
+      Resize(cols, rows).catch((err) => {
+        console.error('resize failed:', err);
+        toast.error('Terminal resize failed');
+      });
     });
 
     const observer = new ResizeObserver(() => {
@@ -238,14 +249,18 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
       const output = event?.data?.data;
       if (output) {
-        console.log({output});
+        if (process.env.NODE_ENV === 'development') {
+          console.log({output});
+        }
         terminalRef.current?.write(output);
       }
     });
 
     const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
       const { exitCode, wasIntentional } = event?.data ?? {};
-      console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
+      }
       if (wasIntentional) {
         onShellExit?.();
       }
@@ -258,13 +273,17 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
       const cmdLine = event?.data?.data;
       if (cmdLine) {
-        Write(cmdLine).catch((err) =>
-          console.error('TerminalService.Write failed:', err)
-        );
+        Write(cmdLine).catch((err) => {
+          console.error('TerminalService.Write failed:', err);
+          toast.error('Terminal write failed');
+        });
       }
     });
 
-    Start(80, 24).catch((err) => console.error('terminal start failed:', err));
+    Start(80, 24).catch((err) => {
+      console.error('terminal start failed:', err);
+      toast.error('Terminal start failed');
+    });
 
     return () => {
       inputDisposable.dispose();

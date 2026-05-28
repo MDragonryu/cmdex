@@ -122,6 +122,7 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	}
 
 	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
+	resolvedScript = stripShebang(resolvedScript)
 	resolvedScript = strings.TrimRight(resolvedScript, "\n")
 	workingDir := s.resolveWorkingDir(cmd)
 

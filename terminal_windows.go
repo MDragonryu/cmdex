@@ -29,7 +29,7 @@ import (
 	"strconv"
 )
 
-func ptyStart(shellPath, shellFlag string, rows, cols int) (*os.File, *exec.Cmd, error) {
+func ptyStart(shellPath, shellFlag string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
 	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
 }
 

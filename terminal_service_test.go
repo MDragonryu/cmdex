@@ -140,13 +140,10 @@ func TestTerminalShutdown(t *testing.T) {
 
 	s := newTestTerminalService(t)
 
-	// Bypass ptyStart to use our specific command.
 	s.shellPath = shellPath
-	s.shellFlag = shellFlag + " -c \"sleep 60\""
+	s.shellFlag = shellFlag
 
-	// Use ptyStart directly with our custom command.
-	// We need to start with a real PTY for the process group kill to work.
-	ptmx, c, err := ptyStart(shellPath, shellFlag+" -c \"sleep 60\"", 80, 24)
+	ptmx, c, err := ptyStart(shellPath, shellFlag, 80, 24, "-c", "sleep 60")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}
@@ -191,7 +188,7 @@ func TestTerminalExit(t *testing.T) {
 
 	// Start a shell that immediately exits.
 	shellPath, shellFlag := detectShell()
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag+" -c \"exit 0\"", 80, 24)
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, 80, 24, "-c", "exit 0")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}

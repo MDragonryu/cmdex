@@ -20,16 +20,16 @@ When adding a new feature that spans backend and frontend, follow these steps in
 ## 3. Regenerate TypeScript Bindings
 Run:
 ```bash
-wails generate module
+make generate
 ```
-This updates `frontend/wailsjs/go/main/App.ts` and `App.d.ts` with the new method signatures.
+This regenerates `frontend/bindings/cmdex/` with updated TypeScript signatures for all exported service methods.
 
 ## 4. TypeScript Types (`frontend/src/types.ts`)
 - Add or update interfaces to mirror the Go structs from step 1
 - Keep field names in camelCase matching the JSON tags
 
 ## 5. React Components
-- Import the generated binding: `import { MyMethod } from '../wailsjs/go/main/App'`
+- Import the generated binding: `import { MyMethod } from '../../bindings/cmdex/servicename'`
 - If adding a modal, extend the `ModalState` discriminated union in `App.tsx`
 - Add handler functions in `App.tsx` following existing patterns
 - Create or update components in `frontend/src/components/`
@@ -39,7 +39,7 @@ This updates `frontend/wailsjs/go/main/App.ts` and `App.d.ts` with the new metho
 ## Checklist
 - [ ] Go struct added/updated in `models.go`
 - [ ] App method added in `app.go`
-- [ ] Bindings regenerated (`wails generate module`)
+- [ ] Bindings regenerated (`make generate`)
 - [ ] TypeScript interface updated in `types.ts`
 - [ ] React component created/updated
 - [ ] i18n keys added to `locales/en.json`

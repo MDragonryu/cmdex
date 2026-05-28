@@ -12,8 +12,10 @@ import (
 	"github.com/creack/pty"
 )
 
-func ptyStart(shellPath, shellFlag string, rows, cols int) (*os.File, *exec.Cmd, error) {
-	cmd := exec.Command(shellPath, shellFlag)
+func ptyStart(shellPath, shellFlag string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+	args := []string{shellFlag}
+	args = append(args, extraArgs...)
+	cmd := exec.Command(shellPath, args...)
 	cmd.Env = os.Environ()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})

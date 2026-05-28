@@ -77,8 +77,12 @@ git mv todos/<name>.pending.md todos/<name>.resolved.md
 
 **If `<name>.resolved.md` already exists (collision):** Do NOT use `git mv` — it will fail. Instead:
 1. Append the full content of `todos/<name>.pending.md` (including its resolution header) to the existing `todos/<name>.resolved.md`
-2. Delete the pending file: `rm todos/<name>.pending.md`
-3. Stage changes: run `git add todos/<name>.resolved.md` unconditionally, then check if inside a git repo (`git rev-parse --is-inside-work-tree`) and only if true run `git rm --quiet --ignore-unmatch todos/<name>.pending.md` to clean up the index (safe even if the file is already deleted); outside git, skip this step
+2. Detect git repo membership: run `git rev-parse --is-inside-work-tree`
+3. If inside a git repo:
+   - Run `git rm todos/<name>.pending.md` to remove and stage the deletion
+   - Run `git add todos/<name>.resolved.md` to stage the updated resolved file
+4. If not in a git repo:
+   - Run `rm todos/<name>.pending.md`
 
 This avoids leaving the `*.pending.md` file in place and prevents `git mv` from erroring on an existing target.
 

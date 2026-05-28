@@ -865,7 +865,12 @@ function App() {
         expandTerminal();
 
         try {
-            await RunCommand(commandId, variables);
+            const result = await RunCommand(commandId, variables);
+            if (result.error || result.exitCode === -1) {
+                if (execTabId === activeTabIdRef.current) {
+                    toast.error(t('toast.commandFailed', { code: result.exitCode ?? -1 }));
+                }
+            }
         } catch (err) {
             if (execTabId === activeTabIdRef.current) {
                 toast.error(t('toast.commandFailed', { code: -1 }));

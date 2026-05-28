@@ -42,6 +42,8 @@ type TerminalService struct {
 	outputCh  chan string
 	outputSeq uint64
 	emitterWg sync.WaitGroup
+
+	droppedCount atomic.Uint64
 }
 
 func detectShell() (path, flag string) {
@@ -122,6 +124,10 @@ func (s *TerminalService) enqueueOutput(data string) {
 	select {
 	case ch <- data:
 	default:
+		count := s.droppedCount.Add(1)
+		if count%100 == 1 {
+			fmt.Printf("TerminalService: outputCh full, dropping data (drop #%d)\n", count)
+		}
 	}
 }
 
@@ -219,7 +225,11 @@ func (s *TerminalService) monitorExit(cmd *exec.Cmd, ptmx *os.File, stopCh chan 
 func (s *TerminalService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	terminalSvc = s
 	s.startEmitter()
-	return s.Start(80, 24)
+	err := s.Start(80, 24)
+	if err != nil {
+		fmt.Printf("TerminalService: Start(80,24) failed (graceful degradation): %v\n", err)
+	}
+	return nil
 }
 
 func (s *TerminalService) ServiceShutdown() error {
@@ -354,6 +364,10 @@ func (s *TerminalService) Write(data string) error {
 func (s *TerminalService) Resize(cols, rows int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if cols < 1 || cols > 65535 || rows < 1 || rows > 65535 {
+		return fmt.Errorf("invalid terminal size: cols=%d, rows=%d (must be 1..65535)", cols, rows)
+	}
 
 	if s.ptmx == nil {
 		return fmt.Errorf("terminal not started")
