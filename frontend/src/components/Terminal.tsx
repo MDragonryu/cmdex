@@ -27,6 +27,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const isFirstMountRef = useRef(true);
+  const backendAvailableRef = useRef(true);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -41,9 +42,15 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
   useImperativeHandle(ref, () => ({
       clear: () => {
+        if (!backendAvailableRef.current) {
+          terminalRef.current?.clear();
+          return;
+        }
         Clear().catch((err) => {
           console.error('clear failed:', err);
-          toast.error('Terminal clear failed');
+          if (backendAvailableRef.current) {
+            backendAvailableRef.current = false;
+          }
         });
         terminalRef.current?.clear();
       },
@@ -213,9 +220,12 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       term.open(containerRef.current);
       requestAnimationFrame(() => {
         fitAddon.fit();
-        Resize(term.cols, term.rows).catch((err) => {
-          console.error('resize failed:', err);
-          toast.error('Terminal resize failed');
+        Start(term.cols, term.rows).catch((err) => {
+          console.error('terminal start failed:', err);
+          if (backendAvailableRef.current) {
+            backendAvailableRef.current = false;
+            toast.error('Terminal start failed');
+          }
         });
         if (!skipTransition) {
             containerRef.current!.style.opacity = '1';
@@ -226,16 +236,22 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     terminalRef.current = term;
 
     const inputDisposable = term.onData((data) => {
+      if (!backendAvailableRef.current) return;
       Write(data).catch((err) => {
         console.error('TerminalService.Write failed:', err);
-        toast.error('Terminal write failed');
+        if (backendAvailableRef.current) {
+          backendAvailableRef.current = false;
+        }
       });
     });
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
+      if (!backendAvailableRef.current) return;
       Resize(cols, rows).catch((err) => {
         console.error('resize failed:', err);
-        toast.error('Terminal resize failed');
+        if (backendAvailableRef.current) {
+          backendAvailableRef.current = false;
+        }
       });
     });
 
@@ -249,6 +265,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
       const output = event?.data?.data;
       if (output) {
+        backendAvailableRef.current = true;
         if (process.env.NODE_ENV === 'development') {
           console.log({output});
         }
@@ -272,17 +289,14 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
       const cmdLine = event?.data?.data;
-      if (cmdLine) {
+      if (cmdLine && backendAvailableRef.current) {
         Write(cmdLine).catch((err) => {
           console.error('TerminalService.Write failed:', err);
-          toast.error('Terminal write failed');
+          if (backendAvailableRef.current) {
+            backendAvailableRef.current = false;
+          }
         });
       }
-    });
-
-    Start(80, 24).catch((err) => {
-      console.error('terminal start failed:', err);
-      toast.error('Terminal start failed');
     });
 
     return () => {
