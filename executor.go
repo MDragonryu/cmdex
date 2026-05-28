@@ -1,25 +1,16 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-)
-
-const (
-	maxStoredOutputBytes = 8 * 1024 // 8KB cap for persisted output
-	defaultExecTimeout   = 60 * time.Second
 )
 
 type Executor struct {
@@ -42,178 +33,6 @@ func NewExecutor() *Executor {
 	}
 
 	return &Executor{shell: shell, flag: flag}
-}
-
-// writeTempScript writes script content to a temp file and returns its path.
-// The extension is platform-appropriate (.bat on Windows, .sh elsewhere).
-func writeTempScript(content string) (string, error) {
-	ext := "*.sh"
-	if runtime.GOOS == "windows" {
-		ext = "*.bat"
-	}
-	f, err := os.CreateTemp("", "cmdex-"+ext)
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.WriteString(content); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-// BuildFinalCommand builds a display string showing the variable values used.
-// Uses the platform-appropriate shell name (basename of e.shell) instead of hardcoded "bash".
-func (e *Executor) BuildFinalCommand(variables map[string]string) string {
-	shellName := e.shell
-	// Use basename for display (e.g., "/bin/zsh" → "zsh", "/bin/sh" → "sh")
-	if idx := strings.LastIndex(shellName, "/"); idx != -1 {
-		shellName = shellName[idx+1:]
-	}
-	if shellName == "" {
-		shellName = "sh"
-	}
-
-	if len(variables) == 0 {
-		return shellName + " <script>"
-	}
-	parts := []string{shellName + " <script>"}
-	for k, v := range variables {
-		parts = append(parts, fmt.Sprintf("%s=%q", k, v))
-	}
-	return strings.Join(parts, " ")
-}
-
-func BuildDisplayCommand(scriptContent string, variables map[string]string) string {
-	resolved := ReplaceTemplateVars(scriptContent, variables)
-	if idx := strings.Index(resolved, "\n"); strings.HasPrefix(resolved, "#!") && idx != -1 {
-		resolved = resolved[idx+1:]
-		resolved = strings.TrimPrefix(resolved, "\n")
-	}
-	resolved = strings.TrimSpace(resolved)
-	return resolved
-}
-
-// OutputChunk represents a single chunk of streaming output
-type OutputChunk struct {
-	Stream string `json:"stream"` // "stdout" or "stderr"
-	Data   string `json:"data"`
-}
-
-// ExecuteScript runs a resolved script (all {{var}} already replaced) and streams output via callback.
-func (e *Executor) ExecuteScript(scriptContent string, workingDir string, onChunk func(OutputChunk)) ExecutionResult {
-	// Strip any existing shebang from stored content (backward compat with old DB records)
-	scriptContent = stripShebang(scriptContent)
-
-	// Add platform-appropriate shebang at execution time
-	if runtime.GOOS != "windows" {
-		scriptContent = "#!/bin/sh\n" + scriptContent
-	}
-
-	tmpPath, err := writeTempScript(scriptContent)
-	if err != nil {
-		return ExecutionResult{Error: err.Error(), ExitCode: -1}
-	}
-	defer os.Remove(tmpPath)
-
-	if runtime.GOOS != "windows" {
-		os.Chmod(tmpPath, 0755)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultExecTimeout)
-	defer cancel()
-
-	var cmd *exec.Cmd
-	cmd = exec.CommandContext(ctx, e.shell, e.flag, tmpPath)
-	if workingDir != "" {
-		cmd.Dir = workingDir
-	}
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return ExecutionResult{Error: err.Error(), ExitCode: -1}
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return ExecutionResult{Error: err.Error(), ExitCode: -1}
-	}
-
-	if err := cmd.Start(); err != nil {
-		return ExecutionResult{Error: err.Error(), ExitCode: -1}
-	}
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var outputBuf, errorBuf strings.Builder
-	outputCapped, errorCapped := false, false
-
-	streamReader := func(pipe io.Reader, stream string, buf *strings.Builder, capped *bool) {
-		defer wg.Done()
-		scanner := bufio.NewScanner(pipe)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text() + "\n"
-			onChunk(OutputChunk{Stream: stream, Data: line})
-
-			mu.Lock()
-			if !*capped {
-				if buf.Len()+len(line) > maxStoredOutputBytes {
-					remaining := maxStoredOutputBytes - buf.Len()
-					if remaining > 0 {
-						buf.WriteString(line[:remaining])
-					}
-					buf.WriteString("\n... [output truncated] ...\n")
-					*capped = true
-				} else {
-					buf.WriteString(line)
-				}
-			}
-			mu.Unlock()
-		}
-	}
-
-	wg.Add(2)
-	go streamReader(stdoutPipe, "stdout", &outputBuf, &outputCapped)
-	go streamReader(stderrPipe, "stderr", &errorBuf, &errorCapped)
-	wg.Wait()
-
-	waitErr := cmd.Wait()
-
-	result := ExecutionResult{
-		Output:   outputBuf.String(),
-		ExitCode: 0,
-	}
-	if errorBuf.Len() > 0 {
-		result.Error = errorBuf.String()
-	}
-
-	if ctx.Err() == context.DeadlineExceeded {
-		onChunk(OutputChunk{Stream: "stderr", Data: fmt.Sprintf("\n[timed out after %s]\n", defaultExecTimeout)})
-		if result.Error != "" {
-			result.Error += "\n"
-		}
-		result.Error += fmt.Sprintf("command timed out after %s", defaultExecTimeout)
-		result.ExitCode = -1
-		return result
-	}
-
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
-			if result.Error == "" {
-				result.Error = waitErr.Error()
-			}
-			result.ExitCode = -1
-		}
-	}
-
-	return result
 }
 
 // stripShebang removes any shebang line (#!...) from the beginning of script content.
@@ -251,25 +70,6 @@ func (e *Executor) OpenInTerminal(terminalID string, scriptContent string, worki
 	}
 
 	return fmt.Errorf("no terminal emulator found")
-}
-
-func appendBackslashToLines(s string) string {
-	lines := strings.Split(s, "\n")
-	last := len(lines) - 1
-	for last >= 0 && strings.TrimSpace(lines[last]) == "" {
-		last--
-	}
-	for i := 0; i < last; i++ {
-		line := lines[i]
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if strings.HasSuffix(strings.TrimRight(line, " \t"), `\`) {
-			continue
-		}
-		lines[i] = line + ` \`
-	}
-	return strings.Join(lines, "\n")
 }
 
 func shellQuoteDir(dir string) string {

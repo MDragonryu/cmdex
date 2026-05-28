@@ -108,9 +108,9 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
-// RunCommand writes the resolved command to the PTY terminal for
-// in-terminal execution. No subprocess or temp-script is used;
-// output appears via the existing pty-output event stream.
+// RunCommand resolves the command's template variables and emits the
+// resulting command line to the frontend via cmd-executing event.
+// The frontend writes it to the integrated terminal for execution.
 func (s *ExecutionService) RunCommand(commandID string, variables map[string]string) ExecutionRecord {
 	cmd, err := db.GetCommand(commandID)
 	if err != nil {
@@ -133,17 +133,9 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	}
 
 	if wailsApp != nil {
-		wailsApp.Event.Emit(eventNames.CmdExecuting, cmdLine)
-	}
-	if err := terminalSvc.Write(cmdLine); err != nil {
-		return ExecutionRecord{
-			ID:         uuid.New().String(),
-			CommandID:  commandID,
-			FinalCmd:   cmdLine,
-			Error:      fmt.Sprintf("terminal write failed: %v", err),
-			ExitCode:   -1,
-			ExecutedAt: time.Now(),
-		}
+		wailsApp.Event.Emit(eventNames.CmdExecuting, map[string]interface{}{
+			"data": cmdLine,
+		})
 	}
 
 	return ExecutionRecord{

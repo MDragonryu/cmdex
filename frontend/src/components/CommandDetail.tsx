@@ -63,7 +63,6 @@ import {
   Plus,
   Loader2,
   Pencil,
-  SquareTerminal,
   X,
   ALargeSmall,
   Hash,
@@ -245,7 +244,6 @@ export interface CommandDetailProps {
   isExecuting: boolean;
   variables: VariablePrompt[];
   onExecute: (values: Record<string, string>) => void;
-  onRunInTerminal: (values: Record<string, string>) => void;
   onFillVariables: (initialValues: Record<string, string>) => void;
   onRenamePreset: (presetId: string, newName: string) => Promise<void>;
   onDeletePreset: (presetId: string) => Promise<void>;
@@ -267,7 +265,6 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
   isExecuting,
   variables,
   onExecute,
-  onRunInTerminal,
   onFillVariables,
   onRenamePreset,
   onDeletePreset,
@@ -968,16 +965,6 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>{t('commandDetail.editScript')}</TooltipContent>
-                  </Tooltip>
-                )}
-                {!isNewCommand && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs" onClick={() => onRunInTerminal(resolvedValues)}>
-                        <SquareTerminal className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t('commandDetail.runInTerminal')}</TooltipContent>
                   </Tooltip>
                 )}
                 <Tooltip>

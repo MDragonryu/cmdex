@@ -167,9 +167,4 @@ type AppSettings struct {
 	WindowHeight   *int   `json:"windowHeight,omitempty"` // settings window height, min 400
 }
 
-// ExecutionResult holds the output of a command execution
-type ExecutionResult struct {
-	Output   string `json:"output"`
-	Error    string `json:"error"`
-	ExitCode int    `json:"exitCode"`
-}
+

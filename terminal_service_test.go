@@ -59,18 +59,14 @@ func TestTerminalDetectShell(t *testing.T) {
 	}
 }
 
-// TestTerminalBatching verifies emitOutput formatting and readLoop structure (PTY-03).
-// This tests batching logic without a real PTY.
+// TestTerminalBatching verifies emitOutput and readLoop exist (PTY-03).
 func TestTerminalBatching(t *testing.T) {
 	s := newTestTerminalService(t)
 
-	// Verify the readLoop and emitOutput methods exist by checking
-	// the struct has the necessary state for batching.
 	_ = s.lastSize
 
-	// readLoop uses bufio.NewReaderSize(s.ptmx, 64*1024) and
-	// time.NewTicker(16 * time.Millisecond) with bytes.Buffer accumulation.
-	// These are verified structurally via the acceptance criteria checks.
+	// readLoop reads PTY output in a background goroutine and emits
+	// each read via emitOutput. No batching or ticker is used.
 }
 
 // TestTerminalStart verifies Start() spawns a shell process via PTY (PTY-01).
@@ -206,14 +202,15 @@ func TestTerminalExit(t *testing.T) {
 	s.cmd = cmd
 	s.stopCh = make(chan struct{}, 1)
 
-	go s.monitorExit()
-	defer s.Stop()
-
-	// Wait for the shell to exit (exit 0 finishes immediately).
+	// Wait for the shell to exit first so ProcessState is populated
+	// before monitorExit reads it from its own Wait call (which returns cached).
 	_ = cmd.Wait()
 	ptmx.Close()
+	s.running = true
 
-	// After Wait(), cmd.ProcessState must be non-nil (process exited).
+	go s.monitorExit(cmd, ptmx, s.stopCh)
+	defer s.Stop()
+
 	if cmd.ProcessState == nil {
 		t.Error("process state is nil after shell exit")
 	}

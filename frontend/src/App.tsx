@@ -78,7 +78,6 @@ import {
     RunCommand,
     GetExecutionHistory,
     ClearExecutionHistory,
-    RunInTerminal,
 } from '../bindings/cmdex/executionservice';
 import i18n from './i18n';
 import {
@@ -939,19 +938,6 @@ function App() {
         runCommandDirect(tabId, values);
     }, [isSavedCommandDraftDirty, runCommandDirect, t]);
 
-    const handleRunInTerminal = useCallback(async (tabId: string, values: Record<string, string>) => {
-        if (isNewCommandTabId(tabId)) return;
-        if (isSavedCommandDraftDirty(tabId)) {
-            toast.message(t('toast.saveBeforeExecute'));
-            return;
-        }
-        try {
-            await RunInTerminal(tabId, values);
-        } catch (err) {
-            toast.error(String(err));
-        }
-    }, [isSavedCommandDraftDirty, t]);
-
     const handleDeleteCommand = async (cmd: Command) => {
         try {
             await DeleteCommand(cmd.id);
@@ -1420,7 +1406,6 @@ function App() {
                                                     defaultWorkingDir={defaultWorkingDir}
                                                     onDraftChange={(partial) => updateDraft(tab.id, partial)}
                                                     onExecute={handleExecute}
-                                                    onRunInTerminal={handleRunInTerminal}
                                                     onFillVariables={handleFillVariablesByTab}
                                                     onRenamePreset={handleRenamePresetForTab}
                                                     onDeletePreset={handleDeletePresetForTab}
@@ -1499,9 +1484,9 @@ function App() {
                             >
                                 <TerminalComponent
                                     ref={terminalRef}
-                                    monoFont={monoFont || 'JetBrains Mono, Fira Code, monospace'}
                                     isVisible={!terminalCollapsed}
                                     theme={theme}
+                                    onShellExit={collapseTerminal}
                                 />
                                 {terminalCollapsed && (
                                     <button

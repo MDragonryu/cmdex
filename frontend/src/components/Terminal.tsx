@@ -6,12 +6,12 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
 import { eventNames } from '../wails/events';
-import { Write, Resize } from '../../bindings/cmdex/terminalservice';
+import { Write, Resize, Start, Clear } from '../../bindings/cmdex/terminalservice';
 
 interface TerminalComponentProps {
-  monoFont: string;
   isVisible: boolean;
   theme: string;
+  onShellExit?: () => void;
 }
 
 export interface TerminalHandle {
@@ -21,7 +21,7 @@ export interface TerminalHandle {
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ monoFont, isVisible, theme }, ref) => {
+    ({ isVisible, theme, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -40,7 +40,8 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
   useImperativeHandle(ref, () => ({
       clear: () => {
-          Write('\x0c').catch((err) => console.error('clear failed:', err));
+        Clear().catch((err) => console.error('clear failed:', err));
+        terminalRef.current?.clear();
       },
       getSelection: () => terminalRef.current?.getSelection() || '',
       getLastOutput: () => {
@@ -115,6 +116,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           for (let i = outputStart; i <= outputEnd; i++) {
               const line = buffer.getLine(i);
               if (!line) continue;
+              const stripped = stripAnsi(line.translateToString(true));
+              if (stripped.length === 0) continue;
+
               if (line.isWrapped) {
                   let parent = i - 1;
                   while (parent >= 0 && buffer.getLine(parent)?.isWrapped) parent--;
@@ -122,10 +126,13 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
                       const parentLine = buffer.getLine(parent);
                       if (parentLine && promptRegex.test(parentLine.translateToString(true).trim())) continue;
                   }
+                  if (outputLines.length > 0) {
+                      outputLines[outputLines.length - 1] += stripped;
+                  }
+                  continue;
               }
-              const text = line.translateToString(true);
-              const stripped = stripAnsi(text);
-              if (stripped.length > 0) outputLines.push(stripped);
+
+              outputLines.push(stripped);
           }
 
           return outputLines.join('\n').trim();
@@ -148,7 +155,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: 14,
-      fontFamily: monoFont || 'JetBrains Mono, Fira Code, monospace',
+      fontFamily: 'JetBrains Mono, Fira Code, monospace',
       fontWeight: '400',
       scrollback: 5000,
       convertEol: true,
@@ -209,6 +216,12 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     terminalRef.current = term;
 
+    const inputDisposable = term.onData((data) => {
+      Write(data).catch((err) =>
+        console.error('TerminalService.Write failed:', err)
+      );
+    });
+
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       Resize(cols, rows).catch((err) => console.error('resize failed:', err));
     });
@@ -220,16 +233,52 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       observer.observe(containerRef.current);
     }
 
+    const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
+      const output = event?.data?.data;
+      if (output) {
+        console.log({output});
+        terminalRef.current?.write(output);
+      }
+    });
+
+    const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
+      const { exitCode, wasIntentional } = event?.data ?? {};
+      console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
+      if (wasIntentional) {
+        onShellExit?.();
+      }
+    });
+
+    const cleanupCleared = Events.On(eventNames.ptyCleared, () => {
+      terminalRef.current?.clear();
+    });
+
+    const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
+      const cmdLine = event?.data?.data;
+      if (cmdLine) {
+        Write(cmdLine).catch((err) =>
+          console.error('TerminalService.Write failed:', err)
+        );
+      }
+    });
+
+    Start(80, 24).catch((err) => console.error('terminal start failed:', err));
+
     return () => {
+      inputDisposable.dispose();
       resizeDisposable.dispose();
       observer.disconnect();
+      cleanupOutput();
+      cleanupExit();
+      cleanupCleared();
+      cleanupCmdExecuting();
       if (terminalRef.current === term) {
         term.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
       }
     };
-  }, [monoFont]);
+  }, []);
 
   useEffect(() => {
     const term = terminalRef.current;
@@ -256,77 +305,6 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
         };
     });
   }, [theme]);
-
-  useEffect(() => {
-    const term = terminalRef.current;
-    if (!term) return;
-
-    const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
-      const output = event?.data?.data;
-      if (output) {
-        term.write(output);
-      }
-    });
-
-    const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
-      const { exitCode, wasIntentional } = event?.data ?? {};
-      console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
-    });
-
-    const cleanupCmd = Events.On(eventNames.cmdOutput, (event: { data: { stream: string; data: string } }) => {
-      const chunk = event?.data;
-      if (!chunk?.data) return;
-      if (chunk.stream === 'stderr') {
-        term.write('\x1b[31m' + chunk.data + '\x1b[0m');
-      } else {
-        term.write(chunk.data);
-      }
-    });
-
-    return () => {
-      cleanupOutput();
-      cleanupExit();
-      cleanupCmd();
-    };
-  }, []);
-
-  useEffect(() => {
-      const term = terminalRef.current;
-      if (!term) return;
-
-      let keystrokeBuffer = '';
-      let flushScheduled = false;
-
-      const flushBuffer = () => {
-        flushScheduled = false;
-        if (keystrokeBuffer.length > 0) {
-          const batch = keystrokeBuffer;
-          keystrokeBuffer = '';
-          Write(batch).catch((err) =>
-            console.error('TerminalService.Write failed:', err)
-          );
-        }
-      };
-
-      const handleData = (data: string) => {
-          // Accumulate keystrokes
-        keystrokeBuffer += data;
-
-        // Schedule a single flush on the next microtask tick,
-        // so multiple same-tick keystrokes are sent as one batch
-        if (!flushScheduled) {
-          flushScheduled = true;
-          Promise.resolve().then(flushBuffer);
-        }
-      };
-
-      const inputDisposable = term.onData(handleData);
-
-      return () => {
-        inputDisposable.dispose();
-        flushBuffer();
-      };
-  }, []);
 
   return (
     <div
