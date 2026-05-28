@@ -49,7 +49,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           if (!buffer) return '';
 
           const stripAnsi = (str: string) => str
+              // eslint-disable-next-line no-control-regex
               .replace(/\x1B\[[0-9;]*[mGKHFJA-Za-z]/g, '')
+              // eslint-disable-next-line no-control-regex
               .replace(/\x1B\][^\x07]*\x07/g, '')
               .replace(/\r/g, '');
 
