@@ -32,6 +32,7 @@ const SHORTCUT_GROUPS = [
     items: [
       { keys: [shortcutLabel('settings')], description: 'Settings' },
       { keys: [shortcutLabel('shortcuts')], description: 'Keyboard Shortcuts' },
+      { keys: [shortcutLabel('toggleTerminal')], description: 'Toggle Terminal' },
     ],
   },
 ];

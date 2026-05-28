@@ -14,7 +14,20 @@
   "tools": {
     "playwright*": false
   },
+
   "agent": {
+    "explore": {
+      "description": "Fast codebase exploration",
+      "model": "opencode-go/deepseek-v4-flash",
+      "variant": "max",
+      "prompt": "{file:.opencode/prompts/explore-guideline.md}"
+    },
+    "executor": {
+      "description": "Default execution subagent for bash commands, tests, builds, and validation",
+      "model": "opencode-go/deepseek-v4-flash",
+      "mode": "subagent",
+      "prompt": "{file:.opencode/prompts/executor-guideline.md}"
+    },
     "playwright-test-generator": {
       "description": "Use this agent when you need to create automated browser tests using Playwright",
       "mode": "subagent",

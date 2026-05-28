@@ -58,7 +58,6 @@ export const SHORTCUTS = {
   search:         { keys: ['cmd', 'f'] },
   settings:       { keys: ['cmd', ','] },
   shortcuts:      { keys: ['cmd', 'shift', '?'] },
-  toggleOutput:   { keys: ['ctrl', '`'] },
   escape:         { keys: ['escape'] },
   discardScript:  { keys: ['cmd', 'shift', 'backspace'] },
   scriptNewLine:  { keys: ['shift', 'enter'] },
@@ -68,6 +67,7 @@ export const SHORTCUTS = {
   lastTab:        { keys: ['cmd', '0'] },
   nextTab:        { keys: ['ctrl', 'tab'] },
   prevTab:        { keys: ['ctrl', 'shift', 'tab'] },
+  toggleTerminal: { keys: ['ctrl', '`'] },
 } as const satisfies Record<string, { keys: readonly string[] }>;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

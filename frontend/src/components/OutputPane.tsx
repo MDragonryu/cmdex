@@ -170,7 +170,7 @@ const OutputPane: React.FC<OutputPaneProps> = ({ record, streamLines, isExecutin
               {isOpen ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{t('outputPane.toggleShortcut')} <ShortcutLabel id="toggleOutput" /></TooltipContent>
+          <TooltipContent>{t('outputPane.toggleShortcut')}</TooltipContent>
         </Tooltip>
       </div>
       <CollapsibleContent>

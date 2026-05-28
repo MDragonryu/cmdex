@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,7 +91,26 @@ func (s *ExecutionService) GetVariables(commandID string) []VariablePrompt {
 	return prompts
 }
 
-// RunCommand executes a command with resolved variables and streams output via event.
+// hasExplicitWorkingDir returns true when either the command or the global
+// settings define a working directory for the current OS. If neither have
+// one, the shell stays in its current (home) directory — no cd sandwich needed.
+func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
+	if cmd.WorkingDir.GetCurrentOS() != "" {
+		return true
+	}
+	settings, err := db.GetSettings()
+	if err != nil {
+		return false
+	}
+	if settings.DefaultWorkingDir != nil {
+		return settings.DefaultWorkingDir.GetCurrentOS() != ""
+	}
+	return false
+}
+
+// RunCommand resolves the command's template variables and emits the
+// resulting command line to the frontend via cmd-executing event.
+// The frontend writes it to the integrated terminal for execution.
 func (s *ExecutionService) RunCommand(commandID string, variables map[string]string) ExecutionRecord {
 	cmd, err := db.GetCommand(commandID)
 	if err != nil {
@@ -102,30 +122,29 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	}
 
 	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	finalCmd := BuildDisplayCommand(cmd.ScriptContent, variables)
+	resolvedScript = stripShebang(resolvedScript)
+	resolvedScript = strings.TrimRight(resolvedScript, "\n")
 	workingDir := s.resolveWorkingDir(cmd)
 
-	result := executor.ExecuteScript(resolvedScript, workingDir, func(chunk OutputChunk) {
-		wailsApp.Event.Emit(eventNames.CmdOutput, chunk)
-	})
-
-	record := ExecutionRecord{
-		ID:            uuid.New().String(),
-		CommandID:     commandID,
-		ScriptContent: cmd.ScriptContent,
-		FinalCmd:      finalCmd,
-		Output:        result.Output,
-		Error:         result.Error,
-		ExitCode:      result.ExitCode,
-		WorkingDir:    workingDir,
-		ExecutedAt:    time.Now(),
+	var cmdLine string
+	if s.hasExplicitWorkingDir(cmd) {
+		cmdLine = fmt.Sprintf("cd %s && %s\n", shellQuoteDir(workingDir), resolvedScript)
+	} else {
+		cmdLine = resolvedScript + "\n"
 	}
 
-	if err := db.AddExecution(record); err != nil {
-		fmt.Printf("failed to persist execution record: %v\n", err)
+	if wailsApp != nil {
+		wailsApp.Event.Emit(eventNames.CmdExecuting, map[string]interface{}{
+			"data": cmdLine,
+		})
 	}
 
-	return record
+	return ExecutionRecord{
+		ID:         uuid.New().String(),
+		CommandID:  commandID,
+		FinalCmd:   cmdLine,
+		ExecutedAt: time.Now(),
+	}
 }
 
 // RunInTerminal opens the command in the system terminal.

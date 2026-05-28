@@ -17,7 +17,6 @@ interface CommandDetailTabProps {
   defaultWorkingDir: OSPathMap;
   onDraftChange: (partial: Partial<TabDraft>) => void;
   onExecute: (tabId: string, values: Record<string, string>) => void;
-  onRunInTerminal: (tabId: string, values: Record<string, string>) => void;
   onFillVariables: (tabId: string, initialValues: Record<string, string>) => void;
   onRenamePreset: (tabId: string, presetId: string, newName: string) => Promise<void>;
   onDeletePreset: (tabId: string, presetId: string) => Promise<void>;
@@ -44,7 +43,6 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
   defaultWorkingDir,
   onDraftChange,
   onExecute,
-  onRunInTerminal,
   onFillVariables,
   onRenamePreset,
   onDeletePreset,
@@ -59,10 +57,6 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
   const boundExecute = useCallback(
     (values: Record<string, string>) => onExecute(tabId, values),
     [tabId, onExecute],
-  );
-  const boundRunInTerminal = useCallback(
-    (values: Record<string, string>) => onRunInTerminal(tabId, values),
-    [tabId, onRunInTerminal],
   );
   const boundFillVariables = useCallback(
     (initialValues: Record<string, string>) => onFillVariables(tabId, initialValues),
@@ -111,7 +105,6 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
         isExecuting={isExecuting}
         variables={variables}
         onExecute={boundExecute}
-        onRunInTerminal={boundRunInTerminal}
         onFillVariables={boundFillVariables}
         onRenamePreset={boundRenamePreset}
         onDeletePreset={boundDeletePreset}

@@ -17,6 +17,7 @@ func main() {
 		Name: "CmDex",
 		Services: []application.Service{
 			application.NewService(appService),
+			application.NewService(&TerminalService{}),
 			application.NewService(&CommandService{}),
 			application.NewService(&ExecutionService{}),
 			application.NewService(&SettingsService{}),

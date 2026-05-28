@@ -509,7 +509,7 @@ body {
   font-size: var(--density-font-size-base, 13px);
 }
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
@@ -907,7 +907,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   background: var(--background);
 }
 
@@ -1897,6 +1897,227 @@ textarea.inline-edit-input {
     opacity: 0;
     transform: translateY(4px);
   }
+}
+
+/* ========== Terminal Split Pane ========== */
+
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.terminal-container {
+  flex: 1;
+  overflow: hidden;
+  opacity: 1;
+  background: var(--background);
+}
+
+.terminal-divider {
+  height: 8px;
+  min-height: 8px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  position: relative;
+  z-index: 10;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-divider::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  height: 1px;
+  margin: auto;
+  background: var(--border);
+  transition: background 0.15s, height 0.1s;
+}
+
+.terminal-divider:hover::before,
+.terminal-divider.dragging::before {
+  height: 2px;
+  background: var(--primary);
+}
+
+.terminal-collapse-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  z-index: 11;
+  line-height: 1;
+  padding: 0;
+}
+
+.terminal-divider:hover .terminal-collapse-btn,
+.terminal-collapse-btn:focus,
+.terminal-collapse-btn:focus-visible,
+.terminal-divider:focus-within .terminal-collapse-btn {
+  opacity: 1;
+}
+
+.terminal-collapse-btn:hover,
+.terminal-collapse-btn:focus-visible {
+  background: var(--accent);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.terminal-clear-btn {
+  position: absolute;
+  right: 12px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  z-index: 11;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.terminal-divider:hover .terminal-clear-btn,
+.terminal-clear-btn:focus,
+.terminal-clear-btn:focus-visible,
+.terminal-divider:focus-within .terminal-clear-btn {
+  opacity: 1;
+}
+
+.terminal-clear-btn:hover,
+.terminal-clear-btn:focus-visible {
+  background: var(--accent);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.terminal-copy-btn {
+  position: absolute;
+  right: 60px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  z-index: 11;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.terminal-divider:hover .terminal-copy-btn,
+.terminal-copy-btn:focus,
+.terminal-copy-btn:focus-visible,
+.terminal-divider:focus-within .terminal-copy-btn {
+  opacity: 1;
+}
+
+.terminal-copy-btn:hover,
+.terminal-copy-btn:focus-visible {
+  background: var(--accent);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.terminal-collapsed-rail {
+  height: 8px;
+  min-height: 8px;
+  flex-shrink: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.terminal-collapsed-rail:hover {
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
+}
+
+.center-area-split {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.center-area-editor {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+/* 1. Target the vertical track container */
+.terminal-container .scrollbar.vertical {
+  width: 6px !important;              /* Matches your previous width */
+  background: transparent !important; /* Matches your previous track background */
+}
+
+/* 2. Target the draggable scroll handle/slider */
+.terminal-container .scrollbar.vertical .slider {
+  width: 6px !important;              /* Match the track width exactly */
+  border-radius: 6px !important;       /* Keeps your rounded edges */
+  background: var(--scrollbar-thumb) !important; /* Uses your custom thumb variable */
+  transition: background 0.15s ease;
+}
+
+/* 3. Target the hover and active states */
+.terminal-container .scrollbar.vertical .slider:hover,
+.terminal-container .scrollbar.vertical .slider.active {
+  background: var(--scrollbar-thumb-hover) !important; /* Uses your custom hover variable */
+}
+
+/* 4. Optional: Handle horizontal scrollbar if your terminal uses it */
+.terminal-container .scrollbar.horizontal {
+  height: 6px !important;
+  background: transparent !important;
+}
+
+.terminal-container .scrollbar.horizontal .slider {
+  height: 6px !important;
+  border-radius: 6px !important;
+  background: var(--scrollbar-thumb) !important;
+}
+
+.terminal-container .scrollbar.horizontal .slider:hover,
+.terminal-container .scrollbar.horizontal .slider.active {
+  background: var(--scrollbar-thumb-hover) !important;
 }
 
 /* ========== Variable Prompt (fill mode) ========== */

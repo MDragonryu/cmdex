@@ -82,12 +82,6 @@ export interface TerminalInfo {
   name: string;
 }
 
-export interface ExecutionResult {
-  output: string;
-  error: string;
-  exitCode: number;
-}
-
 export interface ExecutionRecord {
   id: string;
   commandId: string;

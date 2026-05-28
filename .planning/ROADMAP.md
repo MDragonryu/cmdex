@@ -1,197 +1,167 @@
-# Roadmap: Cmdex
+# Roadmap: Cmdex v2.0 Terminal Integration
 
-## Milestones
+**Milestone:** v2.0
+**Name:** Terminal Integration
+**Goal:** Replace the static output pane with an xterm.js-based PTY terminal with full ANSI support, interactive input, and freeform command typing in a split-pane layout.
 
-- ✅ **v1.0 Premium Polish** — Phases 1-5 (shipped 2026-04-13)
-- ✅ **v1.1 Build Settings Window** — Phases 6-7 (shipped)
-- ✅ **v1.2 DB Migration Refactor** — Phases 8-9 (shipped)
-- ✅ **v1.3 Working Directory** — Phases 10-13 (shipped 2026-04-23)
-- ✅ **v1.4 Editor Multi-Mount Refactor** — Phase 14 (shipped 2026-04-23)
-- 📋 **v1.5 Cross-Platform Execution** — Phase 15 (in progress)
-- 📋 **v2.0 Workspaces** — Phases (planned)
+---
 
-## Phases
+## Phase 16: PTY Backend Foundation
+
+**Goal:** A persistent shell process runs in a Go-managed PTY with bidirectional I/O, resize support, and clean lifecycle management. The frontend can send keystrokes and receive output via Wails events.
+
+**Requirements:** PTY-01, PTY-02, PTY-03, PTY-04, PTY-05, PTY-06, POL-05
+
+**Success criteria:**
+1. Shell spawns in PTY on app startup (bash on macOS/Linux, powershell/cmd on Windows)
+2. Keystrokes sent from Go to PTY stdin produce correct shell echo in PTY output
+3. PTY output streams via Wails events with 16ms batching and 64KB max chunks per emit
+4. Calling `pty.Setsize` with new cols/rows changes shell dimensions (verify via `tput cols; tput lines`)
+5. App shutdown kills the shell process group — no orphaned bash/cmd processes
+6. Shell exit (user types `exit` or receives Ctrl+D) is detected and reported
+7. Shell auto-detection correctly picks bash on macOS/Linux and powershell/cmd on Windows
 
 <details>
-<summary>✅ v1.0 Premium Polish (Phases 1-5) — SHIPPED 2026-04-13</summary>
+<summary>Plans (3 plans)</summary>
 
-### Phase 1: Layout Overhaul
-**Goal**: Responsive layout with collapsible sidebar and smooth transitions
-**Plans**: 3 plans
+- [x] 16-01-PLAN.md — TerminalService struct, service registration, event constants, Unix PTY lifecycle (creack/pty), Windows stubs, shell detection (Wave 1)
+- [x] 16-02-PLAN.md — PTY output streaming with 16ms batching, 64KB chunks, pty-output/pty-exit events, shell exit detection, auto-restart (Wave 2)
+- [x] 16-03-PLAN.md — Test suite for all 7 requirements, Windows go-winpty integration, package legitimacy gate (Wave 2)
 
-Plans:
-- [x] 01-01: Responsive sidebar with auto-collapse
-- [x] 01-02: Inline delete confirmation
-- [x] 01-03: Transition polish (150ms)
+</details>
 
-### Phase 2: Editor & Interactions
-**Goal**: Unified script block with template/preview toggle
-**Plans**: 2 plans
+---
 
-Plans:
-- [x] 02-01: Unified script block
-- [x] 02-02: Editor interactions
+## Phase 17: xterm.js Terminal and Split Pane Layout
 
-### Phase 3: Theme Engine
-**Goal**: Customizable theme system with OS dark/light sync
-**Plans**: 3 plans
+**Goal:** The current OutputPane is replaced by an xterm.js Terminal component in a split pane layout. The terminal renders PTY output, auto-fits to container size, and stays mounted across tab switches.
 
-Plans:
-- [x] 03-01: Theme engine core
-- [x] 03-02: Built-in themes (8)
-- [x] 03-03: OS preference sync
+**Requirements:** TERM-01, TERM-02, TERM-03, TERM-04, LAY-01, LAY-02, LAY-04
 
-### Phase 4: Theme Customization
-**Goal**: User-customizable colors, fonts, and layout density
-**Plans**: 2 plans
+**Success criteria:**
+1. xterm.js terminal renders in the bottom pane with ANSI color support (verify via `ls --color`)
+2. FitAddon resizes terminal when window or divider is resized — no scrollbar gaps
+3. WebglAddon activates on supported hardware, falls back gracefully to canvas renderer
+4. URLs in terminal output are underlined and clickable (WebLinksAddon)
+5. Layout is a vertical split: command editor on top, terminal on bottom, with drag-to-resize divider
+6. Switching command tabs does not unmount the Terminal component (CSS display toggle, not React unmount)
+7. The old OutputPane toggle behavior is fully removed from App.tsx
 
-Plans:
-- [x] 04-01: Custom color picker
-- [x] 04-02: Font & density settings
+**Plans:** 4 plans in 3 waves
 
-### Phase 5: Import & Export
-**Goal**: JSON import/export with variables and presets
-**Plans**: 2 plans
+<details>
+<summary>Plans (Wave 1)</summary>
 
-Plans:
-- [x] 05-01: Export functionality
-- [x] 05-02: Import functionality
+- [x] 17-01-PLAN.md — Install xterm.js packages, create Terminal.tsx with FitAddon/WebglAddon/WebLinksAddon, add terminal CSS
 
 </details>
 
 <details>
-<summary>✅ v1.1 Build Settings Window (Phases 6-7) — SHIPPED</summary>
+<summary>Plans (Wave 2)</summary>
 
-### Phase 6: Wails Window Migration
-**Goal**: Convert settings dialog to separate application window
-**Plans**: TBD
-
-Plans:
-- [x] 06-01: Wails window setup
-- [x] 06-02: Window management
-
-### Phase 7: Settings Window Polish
-**Goal**: Settings persist and apply in real-time
-**Plans**: TBD
-
-Plans:
-- [x] 07-01: Real-time persistence
-- [x] 07-02: Auto-save & UI polish
+- [x] 17-02-PLAN.md — Remove OutputPane from App.tsx (state, imports, shortcuts), add split pane layout with useResizable divider + Terminal component
+- [x] 17-03-PLAN.md — Add ptyOutput/ptyExit to events.ts, regenerate Wails bindings, subscribe to pty-output/pty-exit events in Terminal.tsx
 
 </details>
 
 <details>
-<summary>✅ v1.2 DB Migration Refactor (Phases 8-9) — SHIPPED</summary>
+<summary>Plans (Wave 3 — Gap Closure)</summary>
 
-### Phase 8: Migration Package
-**Goal**: Replace monolithic migrate() with per-file migration pattern
-**Plans**: TBD
-
-Plans:
-- [x] 08-01: Migration package structure
-- [x] 08-02: Migration runner
-
-### Phase 9: Runner Integration
-**Goal**: Port all existing migrations and add rollback support
-**Plans**: TBD
-
-Plans:
-- [x] 09-01: Port existing migrations
-- [x] 09-02: Rollback support
+- [ ] 17-04-PLAN.md — Route RunCommand output to xterm.js terminal via cmd-output event subscription (gap closure: UAT Test 5)
 
 </details>
+
+---
+
+## Phase 18: Execution Integration and Interactivity
+
+**Goal:** Clicking Run writes the resolved command to the terminal. Users can type commands freely. Ctrl+C interrupts running processes. Working directory is respected.
+
+**Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-04, LAY-03
+
+**Success criteria:**
+1. Clicking Run on a saved command writes resolved command text + newline to PTY stdin via TerminalService.Write
+2. Command output appears in the terminal with full ANSI rendering (replaces static OutputPane)
+3. User can type any custom command directly in the terminal and execute it freely
+4. Ctrl+C sends SIGINT and interrupts the foreground process (verify with `sleep 30` then Ctrl+C)
+5. Shell starts in or changes to the command's resolved working directory when a command is loaded
+6. Clear button resets the terminal scrollback buffer
 
 <details>
-<summary>✅ v1.3 Working Directory (Phases 10-13) — SHIPPED 2026-04-23</summary>
+<summary>Plans (3 plans — 2 built + 1 gap closure)</summary>
 
-### Phase 10: Data Foundation
-**Goal**: Working directory data is persistently stored and can be imported/exported across OSes
-**Plans**: 3 plans
-
-Plans:
-- [x] 10-01: Define OSPathMap type and add working directory fields
-- [x] 10-02: Create migration 0010 and update CRUD queries
-- [x] 10-03: Update import/export structs
-
-### Phase 11: Execution Engine & Directory Picker
-**Goal**: Commands execute in the correct working directory with a native directory picker available
-**Plans**: 3 plans
-
-Plans:
-- [x] 11-01: Add Wails binding for native directory picker dialog
-- [x] 11-02: Update executor with fallback chain
-- [x] 11-03: Wire executor fallback logic
-
-### Phase 12: Settings UI
-**Goal**: Users can configure a global default working directory in the Settings window
-**Plans**: 3 plans
-
-Plans:
-- [x] 12-01: Add GetOS binding and working directory input to Settings
-- [x] 12-02: Implement transparent OS-path read/write
-- [x] 12-03: Fix backend persistence and verify round-trip
-
-### Phase 13: Command Editor & List UI
-**Goal**: Users can set and view working directories per command transparently
-**Plans**: 3 plans
-
-Plans:
-- [x] 13-01: Add working directory input to Command Editor
-- [x] 13-02: Display working directory in command list/detail view
-- [x] 13-03: Ensure UI transparency
-
-
-### Phase 14: Editor Multi-Mount Refactor
-
-**Goal:** Refactor `CommandDetail` rendering from single-instance prop-swap to per-tab mounted instances. Each open command tab renders its own `CommandDetail`; inactive tabs hidden via CSS `display:none`. Preserves per-tab local DOM state (textarea undo stack, scroll position, cursor, focus, expanded sections, Radix dialog states) across tab switches. Eliminates full-subtree remount on tab change.
-**Plans:** 3 plans
-
-Plans:
-- [x] 14-01-PLAN.md — Wrap `CommandDetail` in `React.memo` and verify no-op callback safety
-- [x] 14-02-PLAN.md — Stabilize all per-tab action callbacks with `useCallback` factories keyed by `tabId`
-- [x] 14-03-PLAN.md — Refactor JSX to iterated per-tab mounts with visibility toggle and active-tab gating
+- [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
+- [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
+- [x] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
 
 </details>
 
-### Phase 15: Cross-Platform Execution
+---
 
-**Goal:** Centralize command execution to work cross-platform by removing the hardcoded `#!/bin/bash` shebang from stored scripts and making the executor responsible for platform-appropriate shebang injection at runtime.
-**Plans:** 3 plans
+## Phase 19: Terminal Polish
 
-Plans:
-- [x] 15-01: Centralize shebang handling (script.go + executor.go core)
-- [x] 15-02: Fix display commands and terminal execution
-- [x] 15-03: Tests and verification
+**Goal:** Terminal theme syncs with Cmdex themes, font matches app font, copy/paste works per-platform, and the terminal feels native. (SearchAddon deferred per D-09 to a future phase.)
 
-### 📋 v2.0 Workspaces (Planned)
+**Requirements:** POL-01, POL-02, POL-03, POL-04
 
-**Milestone Goal:** Named project contexts with sidebar switcher, cloud sync, and command sharing.
+**Success criteria:**
+1. Switching Cmdex themes updates xterm terminal theme in real time with no flicker
+2. Terminal font family updates when user changes font in Settings
+3. Cmd+C / Ctrl+Shift+C copies selected text from terminal
+4. Cmd+V / Ctrl+Shift+V pastes clipboard text into terminal
 
-**Target features:**
-- Named workspaces with independent command sets
-- Cloudflare Workers + D1 + R2 backend for sync
-- OAuth (Google/GitHub) authentication
-- Shareable command links
+**Plans:** 1 plan in 1 wave
+
+<details>
+<summary>Plans (Wave 1)</summary>
+
+- [x] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
+
+</details>
+
+---
+
+## Phase 20: Terminal Copy Buttons
+
+**Goal:** Add copy buttons to the terminal toolbar — one to copy the last executed command text, one to copy selected terminal output.
+
+**Requirements:** CPY-01, CPY-02
+
+**Success criteria:**
+1. Copy Command button copies the full resolved command text (including `cd` working directory prefix) to clipboard
+2. Copy Output button copies currently selected terminal text to clipboard, or all visible output if nothing is selected
+3. Buttons are accessible in the terminal toolbar alongside Clear
+4. Clipboard write uses `navigator.clipboard.writeText` with a toast confirmation
+
+**Plans:** 1 plan in 1 wave
+
+<details>
+<summary>Plans (Wave 1)</summary>
+
+- [ ] 20-01-PLAN.md — Emit cmd-executing event from Go, add Copy Command + Copy Output buttons to terminal toolbar
+
+</details>
+
+---
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 10 → 11 → 12 → 13 → 14 -> 15
+| Phase | Milestone | Requirements | Status |
+|-------|-----------|-------------|--------|
+| 1-5 | v1.0 Premium Polish | — | Shipped 2026-04-13 |
+| 6-7 | v1.1 Build Settings Window | — | Shipped |
+| 8-9 | v1.2 DB Migration Refactor | — | Shipped |
+| 10-13 | v1.3 Working Directory | 14 | Shipped 2026-04-23 |
+| 14 | v1.4 Editor Multi-Mount Refactor | — | Shipped 2026-04-23 |
+| 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
+| 16 | 3/3 | Complete   | 2026-05-19 |
+| 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
+| 18 | 3/3 | Complete   | 2026-05-21 |
+| 19 | 1/1 | Complete   | 2026-05-22 |
+| 20 | 0/1 | Planned |
 
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 1. Layout Overhaul | v1.0 | 3/3 | Complete | 2026-04-13 |
-| 2. Editor & Interactions | v1.0 | 2/2 | Complete | 2026-04-13 |
-| 3. Theme Engine | v1.0 | 3/3 | Complete | 2026-04-13 |
-| 4. Theme Customization | v1.0 | 2/2 | Complete | 2026-04-13 |
-| 5. Import & Export | v1.0 | 2/2 | Complete | 2026-04-13 |
-| 6. Wails Window Migration | v1.1 | 2/2 | Complete | — |
-| 7. Settings Window Polish | v1.1 | 2/2 | Complete | — |
-| 8. Migration Package | v1.2 | 2/2 | Complete | — |
-| 9. Runner Integration | v1.2 | 2/2 | Complete | — |
-| 10. Data Foundation | v1.3 | 3/3 | Complete | 2026-04-23 |
-| 11. Execution Engine & Directory Picker | v1.3 | 3/3 | Complete | 2026-04-23 |
-| 12. Settings UI | v1.3 | 3/3 | Complete    | 2026-04-23 |
-| 13. Command Editor & List UI | v1.3 | 3/3 | Complete | 2026-04-23 |
-| 14. Editor Multi-Mount Refactor | v1.4 | 3/3 | Complete | 2026-04-23 |
-| 15. Cross-Platform Execution | v1.5 | 1/3 | Complete | 2026-05-04 |
+**Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
+
+---
+
+*Last updated: 2026-05-18*

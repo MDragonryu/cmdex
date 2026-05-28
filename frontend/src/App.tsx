@@ -2,18 +2,18 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import './style.css';
 import { useSyncedRef } from './hooks/useSyncedRef';
+import { useResizable } from './hooks/useResizable';
 import Sidebar from './components/Sidebar';
 import CategoryEditor from './components/CategoryEditor';
 import VariablePrompt from './components/VariablePrompt';
-import HistoryPane from './components/HistoryPane';
-import OutputPane from './components/OutputPane';
+import TerminalComponent, { type TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
 import CommandPalette from './components/CommandPalette';
 import WelcomeTab from './components/WelcomeTab';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
 import CommandDetailTab from './components/CommandDetailTab';
-import { useKeyboardShortcuts, cmdOrCtrl, SHORTCUTS } from './hooks/useKeyboardShortcuts';
+import { useKeyboardShortcuts, cmdOrCtrl } from './hooks/useKeyboardShortcuts';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
@@ -37,7 +37,6 @@ import {
     type VariableDefinition,
     type VariablePrompt as VarPromptType,
     type VariablePreset,
-    type ExecutionRecord,
     type TabDraft,
     type SettingsPayload,
     type OSPathMap,
@@ -75,9 +74,6 @@ import {
 import {
     GetVariables,
     RunCommand,
-    GetExecutionHistory,
-    ClearExecutionHistory,
-    RunInTerminal,
 } from '../bindings/cmdex/executionservice';
 import i18n from './i18n';
 import {
@@ -97,7 +93,6 @@ type ModalState =
     | { type: 'managePresets'; variables: VarPromptType[]; commandId: string; presets: VariablePreset[] }
     | { type: 'fillVariables'; variables: VarPromptType[]; commandId: string; initialValues: Record<string, string> }
     | { type: 'confirmDiscard' }
-    | { type: 'confirmClearHistory' }
     | { type: 'confirmVarRemoval'; removedVars: string[]; tabId: string };
 
 // Legacy localStorage keys — used only for one-time migration on startup
@@ -108,7 +103,7 @@ const CUSTOM_THEMES_KEY = 'cmdex-custom-themes';
 const FONT_SANS_KEY = 'cmdex-ui-font';
 const FONT_MONO_KEY = 'cmdex-mono-font';
 const DENSITY_KEY = 'cmdex-density';
-const MAX_STREAM_LINES = 5000;
+
 
 function App() {
     const { t } = useTranslation();
@@ -119,30 +114,14 @@ function App() {
     const [modal, setModal] = useState<ModalState>({ type: 'none' });
     const [isExecuting, setIsExecuting] = useState(false);
 
-    const [executionHistory, setExecutionHistory] = useState<ExecutionRecord[]>([]);
-    const [selectedRecord, setSelectedRecord] = useState<ExecutionRecord | null>(null);
-    const [outputPaneOpen, setOutputPaneOpen] = useState(false);
     const [serverVariables, setServerVariables] = useState<VarPromptType[]>([]);
     const [currentResolvedValues, setCurrentResolvedValues] = useState<Record<string, string>>({});
     const [lastSelectedPresetId, setLastSelectedPresetId] = useState<string>('');
-    const [streamLines, setStreamLines] = useState<string[]>([]);
-    const streamBufferRef = useRef<string[]>([]);
-    const streamFlushRef = useRef<number | null>(null);
     const executingTabIdRef = useRef<string | null>(null);
     const [executingTabIdState, setExecutingTabIdState] = useState<string | null>(null);
 
-    // Per-tab output state persistence
-    const tabOutputRef = useRef<Record<string, { record: ExecutionRecord | null; streamLines: string[] }>>({});
-
-    // Per-tab pane visibility (history + output); new tabs default to both closed
-    const tabPaneStateRef = useRef<Record<string, { outputOpen: boolean; historyOpen: boolean }>>({});
-    const [historyPaneOpen, setHistoryPaneOpen] = useState(false);
-    const selectedRecordRef = useSyncedRef(selectedRecord);
     const selectedCommandRef = useSyncedRef(selectedCommand);
     const selectedCommandId = selectedCommand?.id;
-    const streamLinesRef = useSyncedRef(streamLines);
-    const outputPaneOpenRef = useSyncedRef(outputPaneOpen);
-    const historyPaneOpenRef = useSyncedRef(historyPaneOpen);
 
     const [openTabs, setOpenTabs] = useState<Tab[]>([]);
     const openTabsRef = useSyncedRef(openTabs);
@@ -161,6 +140,7 @@ function App() {
     const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
+    const terminalRef = useRef<TerminalHandle>(null);
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -168,6 +148,43 @@ function App() {
     const [monoFont, setMonoFont] = useState<string>('JetBrains Mono');
     const [density, setDensity] = useState<string>('comfortable');
     const [defaultWorkingDir, setDefaultWorkingDir] = useState<OSPathMap>({});
+
+    // Terminal split pane state
+    const TERM_STORAGE_KEY = 'cmdex-terminal-height';
+    const MIN_TERM_HEIGHT = 100;
+    const MAX_TERM_HEIGHT_PCT = 0.85;
+
+    const viewportHeight = window.innerHeight;
+    const defaultTermHeight = Math.round(viewportHeight * 0.40);
+    const maxTermHeight = Math.round(viewportHeight * MAX_TERM_HEIGHT_PCT);
+
+    const { size: terminalHeight, isDragging, handleStart } = useResizable({
+        axis: 'y',
+        direction: -1,
+        minSize: MIN_TERM_HEIGHT,
+        maxSize: maxTermHeight,
+        defaultSize: defaultTermHeight,
+        storageKey: TERM_STORAGE_KEY,
+    });
+
+    const [terminalCollapsed, setTerminalCollapsed] = useState<boolean>(() => {
+        return localStorage.getItem(`${TERM_STORAGE_KEY}-collapsed`) === 'true';
+    });
+
+    const collapseTerminal = useCallback(() => {
+        setTerminalCollapsed(true);
+        localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'true');
+    }, []);
+
+    const expandTerminal = useCallback(() => {
+        setTerminalCollapsed(false);
+        localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
+    }, []);
+
+    const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        handleStart(e.clientY);
+    }, [handleStart]);
 
     // Tracks whether settings have been loaded from DB (prevents premature saves before load)
     const settingsLoadedRef = useRef(false);
@@ -338,20 +355,10 @@ function App() {
         }
     }, []);
 
-    const loadHistory = useCallback(async () => {
-        try {
-            const records = await GetExecutionHistory();
-            setExecutionHistory(records || []);
-        } catch (err) {
-            console.error('Failed to load history:', err);
-        }
-    }, []);
-
     useEffect(() => {
         /* eslint-disable react-hooks/set-state-in-effect -- one-time init data loading */
         GetOS().then((os) => setCurrentOS(normalizeOS(os))).catch(() => setCurrentOS('unknown'));
         loadData();
-        loadHistory();
         GetSettings()
             .then((s) => {
                 if (!s) return;
@@ -447,7 +454,7 @@ function App() {
             });
         setOpenTabs([]);
         setActiveTabId(null);
-    }, [loadData, loadHistory]);
+    }, [loadData]);
     /* eslint-enable react-hooks/set-state-in-effect */
 
     const openSettingsWithToast = async () => {
@@ -524,7 +531,6 @@ function App() {
         return cleanup;
     }, [eventsInitialized]);
 
-
     const updateDraft = useCallback((tabId: string, partial: Partial<TabDraft>) => {
         setTabDrafts((prev) => {
             const cur = prev[tabId];
@@ -542,12 +548,6 @@ function App() {
         [tabBaselines],
     );
 
-    const applyPaneState = (tabId: string) => {
-        const saved = tabPaneStateRef.current[tabId];
-        setOutputPaneOpen(saved?.outputOpen ?? false);
-        setHistoryPaneOpen(saved?.historyOpen ?? false);
-    };
-
      
     const finalizeCloseTab = useCallback(
         (tabId: string) => {
@@ -557,15 +557,6 @@ function App() {
                 const idx = prevTabs.findIndex((t) => t.id === tabId);
                 const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
                 if (nextTab) {
-                    const saved = tabOutputRef.current[nextTab.id];
-                    if (saved) {
-                        setSelectedRecord(saved.record);
-                        setStreamLines(saved.streamLines);
-                    } else {
-                        setSelectedRecord(null);
-                        setStreamLines([]);
-                    }
-                    applyPaneState(nextTab.id);
                     if (isNewCommandTabId(nextTab.id)) {
                         const d = tabDraftsRef.current[nextTab.id];
                         setSelectedCommand(makePlaceholderCommand(nextTab.id, d?.categoryId));
@@ -577,9 +568,7 @@ function App() {
                 } else {
                     setSelectedCommand(null);
                     setActiveTabId(null);
-                    setSelectedRecord(null);
-                    setStreamLines([]);
-                }
+                                    }
             }
             setOpenTabs(newTabs);
             setTabDrafts((prev) => {
@@ -592,8 +581,6 @@ function App() {
                 delete n[tabId];
                 return n;
             });
-            delete tabPaneStateRef.current[tabId];
-            delete tabOutputRef.current[tabId];
             delete scriptFetchGenRef.current[tabId];
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
@@ -605,14 +592,6 @@ function App() {
             const prevTabId = activeTabIdRef.current;
             if (prevTabId) {
                 prevTabIdRef.current = prevTabId;
-                tabOutputRef.current[prevTabId] = {
-                    record: selectedRecordRef.current,
-                    streamLines: [...streamLinesRef.current],
-                };
-                tabPaneStateRef.current[prevTabId] = {
-                    outputOpen: outputPaneOpenRef.current,
-                    historyOpen: historyPaneOpenRef.current,
-                };
             }
             const id = createNewTabId();
             const initial = emptyDraft(defaultCategoryId);
@@ -620,30 +599,17 @@ function App() {
             setTabDrafts((prev) => ({ ...prev, [id]: initial }));
             setTabBaselines((prev) => ({ ...prev, [id]: baseline }));
             setSelectedCommand(makePlaceholderCommand(id, defaultCategoryId));
-            setSelectedRecord(null);
-            setStreamLines([]);
-            setActiveTabId(id);
+                        setActiveTabId(id);
             setOpenTabs((prev) => [...prev, { id, title: t('commandEditor.newCommand') }]);
-            tabPaneStateRef.current[id] = { outputOpen: false, historyOpen: false };
-            applyPaneState(id);
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
         [t],
     );
 
     const openTab = useCallback((cmd: Command) => {
-        // Save current tab's output + pane state before switching
         const prevTabId = activeTabIdRef.current;
         if (prevTabId && prevTabId !== cmd.id) {
             prevTabIdRef.current = prevTabId;
-            tabOutputRef.current[prevTabId] = {
-                record: selectedRecordRef.current,
-                streamLines: [...streamLinesRef.current],
-            };
-            tabPaneStateRef.current[prevTabId] = {
-                outputOpen: outputPaneOpenRef.current,
-                historyOpen: historyPaneOpenRef.current,
-            };
         }
         setSelectedCommand(cmd);
         setActiveTabId(cmd.id);
@@ -657,21 +623,8 @@ function App() {
             return [...prev, { id: cmd.id, title: tabTitle }];
         });
         if (isExisting) {
-            const savedOutput = tabOutputRef.current[cmd.id];
-            if (savedOutput) {
-                setSelectedRecord(savedOutput.record);
-                setStreamLines(savedOutput.streamLines);
-            } else {
-                setSelectedRecord(null);
-                setStreamLines([]);
-            }
-            applyPaneState(cmd.id);
             return;
         }
-        setSelectedRecord(null);
-        setStreamLines([]);
-        tabPaneStateRef.current[cmd.id] = { outputOpen: false, historyOpen: false };
-        applyPaneState(cmd.id);
         const g = (scriptFetchGenRef.current[cmd.id] = (scriptFetchGenRef.current[cmd.id] ?? 0) + 1);
         void GetScriptBody(cmd.id)
             .then((body) => {
@@ -813,29 +766,10 @@ function App() {
 
     const handleSelectTab = (tabId: string) => {
         if (tabId === activeTabId) return;
-        // Save current tab's output + pane state
         if (activeTabId) {
             prevTabIdRef.current = activeTabId;
-            tabOutputRef.current[activeTabId] = {
-                record: selectedRecord,
-                streamLines: [...streamLines],
-            };
-            tabPaneStateRef.current[activeTabId] = {
-                outputOpen: outputPaneOpen,
-                historyOpen: historyPaneOpen,
-            };
         }
         setActiveTabId(tabId);
-        // Restore target tab's output state
-        const savedOutput = tabOutputRef.current[tabId];
-        if (savedOutput) {
-            setSelectedRecord(savedOutput.record);
-            setStreamLines(savedOutput.streamLines);
-        } else {
-            setSelectedRecord(null);
-            setStreamLines([]);
-        }
-        applyPaneState(tabId);
         if (isNewCommandTabId(tabId)) {
             const d = tabDraftsRef.current[tabId];
             setSelectedCommand(makePlaceholderCommand(tabId, d?.categoryId));
@@ -923,110 +857,31 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, []);
 
-    const flushStreamBuffer = useCallback(() => {
-        const execTabId = executingTabIdRef.current;
-        const newLines = streamBufferRef.current;
-        streamBufferRef.current = [];
-        streamFlushRef.current = null;
-
-        if (execTabId) {
-            const slot = tabOutputRef.current[execTabId] || { record: null, streamLines: [] };
-            const combined = [...slot.streamLines, ...newLines];
-            tabOutputRef.current[execTabId] = {
-                ...slot,
-                streamLines: combined.length > MAX_STREAM_LINES
-                    ? combined.slice(combined.length - MAX_STREAM_LINES)
-                    : combined,
-            };
-        }
-
-        if (execTabId === activeTabIdRef.current) {
-            setStreamLines((prev) => {
-                const combined = [...prev, ...newLines];
-                if (combined.length > MAX_STREAM_LINES) {
-                    return combined.slice(combined.length - MAX_STREAM_LINES);
-                }
-                return combined;
-            });
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
-    }, []);
-
     const runCommandDirect = useCallback(async (commandId: string, variables: Record<string, string>) => {
         const execTabId = activeTabIdRef.current;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         setIsExecuting(true);
-        setSelectedRecord(null);
-        setStreamLines([]);
-        streamBufferRef.current = [];
-        if (execTabId) {
-            tabOutputRef.current[execTabId] = { record: null, streamLines: [] };
-        }
-        setOutputPaneOpen(true);
-        setHistoryPaneOpen(true);
-
-        const cleanup = Events.On(eventNames.cmdOutput, (event) => {
-            const chunk = event.data as { stream: string; data: string };
-            const prefix = chunk.stream === 'stderr' ? '\x1b[stderr]' : '';
-            streamBufferRef.current.push(prefix + chunk.data);
-            if (streamFlushRef.current === null) {
-                streamFlushRef.current = requestAnimationFrame(flushStreamBuffer);
-            }
-        });
+        expandTerminal();
 
         try {
-            const record = await RunCommand(commandId, variables);
-            if (streamFlushRef.current !== null) {
-                cancelAnimationFrame(streamFlushRef.current);
-                streamFlushRef.current = null;
-            }
-            if (streamBufferRef.current.length > 0) {
-                flushStreamBuffer();
-            }
-            if (execTabId) {
-                const cached = tabOutputRef.current[execTabId];
-                tabOutputRef.current[execTabId] = {
-                    record,
-                    streamLines: cached?.streamLines || [],
-                };
-            }
-            if (execTabId === activeTabIdRef.current) {
-                setSelectedRecord(record);
-            }
-            await loadHistory();
-            if (record.exitCode === 0) {
-                toast.success(t('toast.commandSuccess'));
-            } else {
-                toast.error(t('toast.commandFailed', { code: record.exitCode }));
+            const result = await RunCommand(commandId, variables);
+            if (result.error || result.exitCode === -1) {
+                if (execTabId === activeTabIdRef.current) {
+                    toast.error(t('toast.commandFailed', { code: result.exitCode ?? -1 }));
+                }
             }
         } catch (err) {
-            const errRecord: ExecutionRecord = {
-                id: '',
-                commandId: commandId,
-                scriptContent: '',
-                finalCmd: '',
-                output: '',
-                error: String(err),
-                exitCode: -1,
-                workingDir: '',
-                executedAt: new Date().toISOString(),
-            };
-            if (execTabId) {
-                tabOutputRef.current[execTabId] = { record: errRecord, streamLines: [] };
-            }
             if (execTabId === activeTabIdRef.current) {
-                setSelectedRecord(errRecord);
+                toast.error(t('toast.commandFailed', { code: -1 }));
             }
-            toast.error(t('toast.commandFailed', { code: -1 }));
         } finally {
-            cleanup();
             executingTabIdRef.current = null;
             setExecutingTabIdState(null);
             setIsExecuting(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
-    }, [flushStreamBuffer, t, loadHistory]);
+    }, [t]);
 
     const handleExecute = useCallback(async (tabId: string, values: Record<string, string>) => {
         if (isNewCommandTabId(tabId)) return;
@@ -1036,19 +891,6 @@ function App() {
         }
         runCommandDirect(tabId, values);
     }, [isSavedCommandDraftDirty, runCommandDirect, t]);
-
-    const handleRunInTerminal = useCallback(async (tabId: string, values: Record<string, string>) => {
-        if (isNewCommandTabId(tabId)) return;
-        if (isSavedCommandDraftDirty(tabId)) {
-            toast.message(t('toast.saveBeforeExecute'));
-            return;
-        }
-        try {
-            await RunInTerminal(tabId, values);
-        } catch (err) {
-            toast.error(String(err));
-        }
-    }, [isSavedCommandDraftDirty, t]);
 
     const handleDeleteCommand = async (cmd: Command) => {
         try {
@@ -1274,33 +1116,6 @@ function App() {
         openTab(cmd);
     };
 
-    const handleSelectRecord = (record: ExecutionRecord) => {
-        setSelectedRecord(record);
-        setStreamLines([]);
-        setOutputPaneOpen(true);
-        setHistoryPaneOpen(true);
-        if (activeTabId) {
-            tabOutputRef.current[activeTabId] = { record, streamLines: [] };
-        }
-    };
-
-    const handleClearHistory = () => {
-        setModal({ type: 'confirmClearHistory' });
-    };
-
-    const confirmClearHistory = async () => {
-        try {
-            await ClearExecutionHistory();
-            setExecutionHistory([]);
-            setSelectedRecord(null);
-            setStreamLines([]);
-            tabOutputRef.current = {};
-            setModal({ type: 'none' });
-        } catch (err) {
-            console.error('Failed to clear history:', err);
-        }
-    };
-
     /* eslint-disable react-hooks/refs -- keyboard shortcuts use ref-based handlers (not called during render) */
     useKeyboardShortcuts({
         [`${cmdOrCtrl}+p`]: () => setPaletteOpen(true),
@@ -1357,14 +1172,18 @@ function App() {
             if (prev) handleSelectTab(prev.id);
         },
 
+        'ctrl+`': () => {
+            if (terminalCollapsed) {
+                expandTerminal();
+            } else {
+                collapseTerminal();
+            }
+        },
+
         [`${cmdOrCtrl}+shift+backspace`]: () => {
             if (activeTabId && activeDirty) {
                 handleDiscardTab(activeTabId);
             }
-        },
-
-        [SHORTCUTS.toggleOutput.keys.join('+')]: () => {
-            setOutputPaneOpen((prev) => !prev);
         },
 
         // Cmd+1-6: jump to nth tab
@@ -1393,14 +1212,6 @@ function App() {
         ...(paletteOpen ? { escape: () => setPaletteOpen(false) } : {}),
     });
     /* eslint-enable react-hooks/refs */
-
-    const commandHistory = useMemo(
-        () =>
-            selectedCommand && !isNewCommandTabId(selectedCommandId)
-                ? executionHistory.filter((r) => r.commandId === selectedCommandId)
-                : executionHistory,
-        [selectedCommand, selectedCommandId, executionHistory],
-    );
 
     // Memoize per-tab variable definitions so inactive tabs get stable references
     // (prevents React.memo bypass from new array on every App render).
@@ -1467,95 +1278,144 @@ function App() {
                             onCloseTab={closeTab}
                         />
 
-                        <div className="top-area">
-                            <div className="main-content" ref={mainContentRef}>
-                                {/* Loading state: selectedCommand exists but draft hasn't hydrated yet */}
-                                {selectedCommand && !activeDraft && (
-                                    <div className="main-body">
-                                        <p className="text-muted-foreground text-sm p-4">{t('common.loading')}</p>
-                                    </div>
-                                )}
+                        <div className="center-area-split">
+                            <div className="center-area-editor">
+                                <div className="main-content" ref={mainContentRef}>
+                                    {/* Loading state: selectedCommand exists but draft hasn't hydrated yet */}
+                                    {selectedCommand && !activeDraft && (
+                                        <div className="main-body">
+                                            <p className="text-muted-foreground text-sm p-4">{t('common.loading')}</p>
+                                        </div>
+                                    )}
 
-                                {/* Welcome state: no command selected and no active draft */}
-                                {!selectedCommand && !activeDraft && (
-                                    <div className="main-body">
-                                        <WelcomeTab onNewCommand={() => openNewCommandTab()} />
-                                    </div>
-                                )}
+                                    {/* Welcome state: no command selected and no active draft */}
+                                    {!selectedCommand && !activeDraft && (
+                                        <div className="main-body">
+                                            <WelcomeTab onNewCommand={() => openNewCommandTab()} />
+                                        </div>
+                                    )}
 
-                                {/* Per-tab mounts: one CommandDetailTab per open command tab.
-                                    Inactive tabs are hidden via display:none so their DOM state
-                                    (scroll, cursor, textarea undo) survives across tab switches. */}
-                                {openTabs
-                                    .filter((tab) => tab.id !== '__welcome__')
-                                    .map((tab) => {
-                                        const draft = tabDrafts[tab.id];
-                                        const baseline = tabBaselines[tab.id];
-                                        const isTabNew = isNewCommandTabId(tab.id);
-                                        const command = isTabNew
-                                            ? makePlaceholderCommand(tab.id, draft?.categoryId)
-                                            : commands.find((c) => c.id === tab.id) ?? null;
-                                        const isTabDirty = !!(draft && baseline && !draftsEqual(draft, baseline));
-                                        const isTabActive = tab.id === activeTabId;
+                                    {/* Per-tab mounts: one CommandDetailTab per open command tab.
+                                        Inactive tabs are hidden via display:none so their DOM state
+                                        (scroll, cursor, textarea undo) survives across tab switches. */}
+                                    {openTabs
+                                        .filter((tab) => tab.id !== '__welcome__')
+                                        .map((tab) => {
+                                            const draft = tabDrafts[tab.id];
+                                            const baseline = tabBaselines[tab.id];
+                                            const isTabNew = isNewCommandTabId(tab.id);
+                                            const command = isTabNew
+                                                ? makePlaceholderCommand(tab.id, draft?.categoryId)
+                                                : commands.find((c) => c.id === tab.id) ?? null;
+                                            const isTabDirty = !!(draft && baseline && !draftsEqual(draft, baseline));
+                                            const isTabActive = tab.id === activeTabId;
 
-                                        const tabVariables = isTabActive
-                                            ? resolvedVariables
-                                            : (tabVariablesMap[tab.id] ?? []);
+                                            const tabVariables = isTabActive
+                                                ? resolvedVariables
+                                                : (tabVariablesMap[tab.id] ?? []);
 
-                                        if (!command || !draft) return null;
+                                            if (!command || !draft) return null;
 
-                                        return (
-                                            <CommandDetailTab
-                                                key={tab.id}
-                                                tabId={tab.id}
-                                                command={command}
-                                                draft={draft}
-                                                baseline={baseline}
-                                                isTabNew={isTabNew}
-                                                isTabActive={isTabActive}
-                                                isTabDirty={isTabDirty}
-                                                isExecuting={tab.id === executingTabId}
-                                                variables={tabVariables}
-                                                currentOS={currentOS}
-                                                defaultWorkingDir={defaultWorkingDir}
-                                                onDraftChange={(partial) => updateDraft(tab.id, partial)}
-                                                onExecute={handleExecute}
-                                                onRunInTerminal={handleRunInTerminal}
-                                                onFillVariables={handleFillVariablesByTab}
-                                                onRenamePreset={handleRenamePresetForTab}
-                                                onDeletePreset={handleDeletePresetForTab}
-                                                onAddPreset={handleAddPresetForTab}
-                                                onSavePresetValues={handleSavePresetValuesForTab}
-                                                onReorderPresets={handleReorderPresetsForTab}
-                                                onSaveScript={handleSaveScript}
-                                                onResolvedValuesChange={isTabActive ? setCurrentResolvedValues : undefined}
-                                                onSave={() => void handleSaveTab(tab.id)}
-                                                onDiscard={() => handleDiscardTab(tab.id)}
-                                            />
-                                        );
-                                    })}
+                                            return (
+                                                <CommandDetailTab
+                                                    key={tab.id}
+                                                    tabId={tab.id}
+                                                    command={command}
+                                                    draft={draft}
+                                                    baseline={baseline}
+                                                    isTabNew={isTabNew}
+                                                    isTabActive={isTabActive}
+                                                    isTabDirty={isTabDirty}
+                                                    isExecuting={tab.id === executingTabId}
+                                                    variables={tabVariables}
+                                                    currentOS={currentOS}
+                                                    defaultWorkingDir={defaultWorkingDir}
+                                                    onDraftChange={(partial) => updateDraft(tab.id, partial)}
+                                                    onExecute={handleExecute}
+                                                    onFillVariables={handleFillVariablesByTab}
+                                                    onRenamePreset={handleRenamePresetForTab}
+                                                    onDeletePreset={handleDeletePresetForTab}
+                                                    onAddPreset={handleAddPresetForTab}
+                                                    onSavePresetValues={handleSavePresetValuesForTab}
+                                                    onReorderPresets={handleReorderPresetsForTab}
+                                                    onSaveScript={handleSaveScript}
+                                                    onResolvedValuesChange={isTabActive ? setCurrentResolvedValues : undefined}
+                                                    onSave={() => void handleSaveTab(tab.id)}
+                                                    onDiscard={() => handleDiscardTab(tab.id)}
+                                                />
+                                            );
+                                        })}
+
+                                </div>
                             </div>
 
-                            {!isWelcome && (
-                                <HistoryPane
-                                    records={commandHistory}
-                                    selectedRecordId={selectedRecord?.id || null}
-                                    onSelectRecord={handleSelectRecord}
-                                    onClearHistory={handleClearHistory}
-                                    defaultCollapsed={!historyPaneOpen}
-                                />
+                            {!terminalCollapsed && (
+                                <div
+                                    className={`terminal-divider ${isDragging ? 'dragging' : ''}`}
+                                    onMouseDown={handleTerminalResizeStart}
+                                >
+                                    <button
+                                        className="terminal-collapse-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={collapseTerminal}
+                                        aria-label="Collapse terminal panel"
+                                    >
+                                        ▼
+                                    </button>
+                                    <button
+                                        className="terminal-clear-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={() => terminalRef.current?.clear()}
+                                        aria-label="Clear terminal"
+                                        title="Clear terminal (Ctrl+L)"
+                                    >
+                                        {t('common.clear')}
+                                    </button>
+                                    <button
+                                        className="terminal-copy-btn"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={() => {
+                                            const output = terminalRef.current?.getLastOutput() || '';
+                                            if (output) {
+                                                navigator.clipboard.writeText(output).then(() => {
+                                                    toast.success('Output copied');
+                                                }).catch(() => {
+                                                    toast.error('Failed to copy');
+                                                });
+                                            }
+                                        }}
+                                        aria-label="Copy terminal output"
+                                        title="Copy last command output"
+                                    >
+                                        {t('common.copyLastOutput')}
+                                    </button>
+                                </div>
                             )}
-                        </div>
 
-                        {!isWelcome && (
-                            <OutputPane
-                                record={selectedRecord}
-                                streamLines={streamLines}
-                                isExecuting={isExecuting}
-                                isOpen={outputPaneOpen}
-                                onToggle={() => setOutputPaneOpen((prev) => !prev)}
-                            />
-                        )}
+                            <div
+                                className="terminal-pane"
+                                style={terminalCollapsed
+                                    ? { height: 8, minHeight: 8, maxHeight: 8 }
+                                    : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
+                                }
+                            >
+                                <TerminalComponent
+                                    ref={terminalRef}
+                                    isVisible={!terminalCollapsed}
+                                    theme={theme}
+                                    onShellExit={collapseTerminal}
+                                />
+                                {terminalCollapsed && (
+                                    <button
+                                        className="terminal-collapsed-rail"
+                                        onClick={expandTerminal}
+                                        aria-label="Expand terminal panel"
+                                    >
+                                        ▲
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1623,20 +1483,6 @@ function App() {
                                 }}
                             >
                                 {t('app.discard')}
-                            </AlertDialogAction>
-                        </AlertDialogFooter>
-                    </AlertDialogContent>
-                </AlertDialog>
-                <AlertDialog open={modal.type === 'confirmClearHistory'} onOpenChange={(open) => { if (!open) setModal({ type: 'none' }); }}>
-                    <AlertDialogContent>
-                        <AlertDialogHeader>
-                            <AlertDialogTitle>{t('app.clearHistoryTitle')}</AlertDialogTitle>
-                            <AlertDialogDescription>{t('app.clearHistoryDescription')}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                            <AlertDialogCancel>{t('app.cancel')}</AlertDialogCancel>
-                            <AlertDialogAction onClick={confirmClearHistory} variant="destructive">
-                                {t('app.delete')}
                             </AlertDialogAction>
                         </AlertDialogFooter>
                     </AlertDialogContent>
