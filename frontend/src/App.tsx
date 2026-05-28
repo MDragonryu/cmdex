@@ -6,7 +6,6 @@ import { useResizable } from './hooks/useResizable';
 import Sidebar from './components/Sidebar';
 import CategoryEditor from './components/CategoryEditor';
 import VariablePrompt from './components/VariablePrompt';
-import HistoryPane from './components/HistoryPane';
 import TerminalComponent, { type TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
@@ -38,7 +37,6 @@ import {
     type VariableDefinition,
     type VariablePrompt as VarPromptType,
     type VariablePreset,
-    type ExecutionRecord,
     type TabDraft,
     type SettingsPayload,
     type OSPathMap,
@@ -76,8 +74,6 @@ import {
 import {
     GetVariables,
     RunCommand,
-    GetExecutionHistory,
-    ClearExecutionHistory,
 } from '../bindings/cmdex/executionservice';
 import i18n from './i18n';
 import {
@@ -97,7 +93,6 @@ type ModalState =
     | { type: 'managePresets'; variables: VarPromptType[]; commandId: string; presets: VariablePreset[] }
     | { type: 'fillVariables'; variables: VarPromptType[]; commandId: string; initialValues: Record<string, string> }
     | { type: 'confirmDiscard' }
-    | { type: 'confirmClearHistory' }
     | { type: 'confirmVarRemoval'; removedVars: string[]; tabId: string };
 
 // Legacy localStorage keys — used only for one-time migration on startup
@@ -119,21 +114,14 @@ function App() {
     const [modal, setModal] = useState<ModalState>({ type: 'none' });
     const [isExecuting, setIsExecuting] = useState(false);
 
-    const [executionHistory, setExecutionHistory] = useState<ExecutionRecord[]>([]);
-    const [selectedRecord, setSelectedRecord] = useState<ExecutionRecord | null>(null);
     const [serverVariables, setServerVariables] = useState<VarPromptType[]>([]);
     const [currentResolvedValues, setCurrentResolvedValues] = useState<Record<string, string>>({});
     const [lastSelectedPresetId, setLastSelectedPresetId] = useState<string>('');
     const executingTabIdRef = useRef<string | null>(null);
     const [executingTabIdState, setExecutingTabIdState] = useState<string | null>(null);
 
-    // Per-tab pane visibility (history); new tabs default to closed
-    const tabPaneStateRef = useRef<Record<string, { historyOpen: boolean }>>({});
-    const [historyPaneOpen, setHistoryPaneOpen] = useState(false);
-    const selectedRecordRef = useSyncedRef(selectedRecord);
     const selectedCommandRef = useSyncedRef(selectedCommand);
     const selectedCommandId = selectedCommand?.id;
-    const historyPaneOpenRef = useSyncedRef(historyPaneOpen);
 
     const [openTabs, setOpenTabs] = useState<Tab[]>([]);
     const openTabsRef = useSyncedRef(openTabs);
@@ -367,20 +355,10 @@ function App() {
         }
     }, []);
 
-    const loadHistory = useCallback(async () => {
-        try {
-            const records = await GetExecutionHistory();
-            setExecutionHistory(records || []);
-        } catch (err) {
-            console.error('Failed to load history:', err);
-        }
-    }, []);
-
     useEffect(() => {
         /* eslint-disable react-hooks/set-state-in-effect -- one-time init data loading */
         GetOS().then((os) => setCurrentOS(normalizeOS(os))).catch(() => setCurrentOS('unknown'));
         loadData();
-        loadHistory();
         GetSettings()
             .then((s) => {
                 if (!s) return;
@@ -476,7 +454,7 @@ function App() {
             });
         setOpenTabs([]);
         setActiveTabId(null);
-    }, [loadData, loadHistory]);
+    }, [loadData]);
     /* eslint-enable react-hooks/set-state-in-effect */
 
     const openSettingsWithToast = async () => {
@@ -570,11 +548,6 @@ function App() {
         [tabBaselines],
     );
 
-    const applyPaneState = (tabId: string) => {
-        const saved = tabPaneStateRef.current[tabId];
-        setHistoryPaneOpen(saved?.historyOpen ?? false);
-    };
-
      
     const finalizeCloseTab = useCallback(
         (tabId: string) => {
@@ -584,8 +557,6 @@ function App() {
                 const idx = prevTabs.findIndex((t) => t.id === tabId);
                 const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
                 if (nextTab) {
-                    setSelectedRecord(null);
-                    applyPaneState(nextTab.id);
                     if (isNewCommandTabId(nextTab.id)) {
                         const d = tabDraftsRef.current[nextTab.id];
                         setSelectedCommand(makePlaceholderCommand(nextTab.id, d?.categoryId));
@@ -597,7 +568,6 @@ function App() {
                 } else {
                     setSelectedCommand(null);
                     setActiveTabId(null);
-                    setSelectedRecord(null);
                                     }
             }
             setOpenTabs(newTabs);
@@ -611,7 +581,6 @@ function App() {
                 delete n[tabId];
                 return n;
             });
-            delete tabPaneStateRef.current[tabId];
             delete scriptFetchGenRef.current[tabId];
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
@@ -623,9 +592,6 @@ function App() {
             const prevTabId = activeTabIdRef.current;
             if (prevTabId) {
                 prevTabIdRef.current = prevTabId;
-                tabPaneStateRef.current[prevTabId] = {
-                    historyOpen: historyPaneOpenRef.current,
-                };
             }
             const id = createNewTabId();
             const initial = emptyDraft(defaultCategoryId);
@@ -633,24 +599,17 @@ function App() {
             setTabDrafts((prev) => ({ ...prev, [id]: initial }));
             setTabBaselines((prev) => ({ ...prev, [id]: baseline }));
             setSelectedCommand(makePlaceholderCommand(id, defaultCategoryId));
-            setSelectedRecord(null);
                         setActiveTabId(id);
             setOpenTabs((prev) => [...prev, { id, title: t('commandEditor.newCommand') }]);
-            tabPaneStateRef.current[id] = { historyOpen: false };
-            applyPaneState(id);
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
         [t],
     );
 
     const openTab = useCallback((cmd: Command) => {
-        // Save current tab's output + pane state before switching
         const prevTabId = activeTabIdRef.current;
         if (prevTabId && prevTabId !== cmd.id) {
             prevTabIdRef.current = prevTabId;
-            tabPaneStateRef.current[prevTabId] = {
-                historyOpen: historyPaneOpenRef.current,
-            };
         }
         setSelectedCommand(cmd);
         setActiveTabId(cmd.id);
@@ -664,12 +623,8 @@ function App() {
             return [...prev, { id: cmd.id, title: tabTitle }];
         });
         if (isExisting) {
-            applyPaneState(cmd.id);
             return;
         }
-        setSelectedRecord(null);
-                tabPaneStateRef.current[cmd.id] = { historyOpen: false };
-        applyPaneState(cmd.id);
         const g = (scriptFetchGenRef.current[cmd.id] = (scriptFetchGenRef.current[cmd.id] ?? 0) + 1);
         void GetScriptBody(cmd.id)
             .then((body) => {
@@ -811,16 +766,10 @@ function App() {
 
     const handleSelectTab = (tabId: string) => {
         if (tabId === activeTabId) return;
-        // Save current tab's pane state
         if (activeTabId) {
             prevTabIdRef.current = activeTabId;
-            tabPaneStateRef.current[activeTabId] = {
-                historyOpen: historyPaneOpen,
-            };
         }
         setActiveTabId(tabId);
-        setSelectedRecord(null);
-                applyPaneState(tabId);
         if (isNewCommandTabId(tabId)) {
             const d = tabDraftsRef.current[tabId];
             setSelectedCommand(makePlaceholderCommand(tabId, d?.categoryId));
@@ -1162,26 +1111,6 @@ function App() {
         openTab(cmd);
     };
 
-    const handleSelectRecord = (record: ExecutionRecord) => {
-        setSelectedRecord(record);
-                setHistoryPaneOpen(true);
-    };
-
-    const handleClearHistory = () => {
-        setModal({ type: 'confirmClearHistory' });
-    };
-
-    const confirmClearHistory = async () => {
-        try {
-            await ClearExecutionHistory();
-            setExecutionHistory([]);
-            setSelectedRecord(null);
-                        setModal({ type: 'none' });
-        } catch (err) {
-            console.error('Failed to clear history:', err);
-        }
-    };
-
     /* eslint-disable react-hooks/refs -- keyboard shortcuts use ref-based handlers (not called during render) */
     useKeyboardShortcuts({
         [`${cmdOrCtrl}+p`]: () => setPaletteOpen(true),
@@ -1278,14 +1207,6 @@ function App() {
         ...(paletteOpen ? { escape: () => setPaletteOpen(false) } : {}),
     });
     /* eslint-enable react-hooks/refs */
-
-    const commandHistory = useMemo(
-        () =>
-            selectedCommand && !isNewCommandTabId(selectedCommandId)
-                ? executionHistory.filter((r) => r.commandId === selectedCommandId)
-                : executionHistory,
-        [selectedCommand, selectedCommandId, executionHistory],
-    );
 
     // Memoize per-tab variable definitions so inactive tabs get stable references
     // (prevents React.memo bypass from new array on every App render).
@@ -1420,15 +1341,6 @@ function App() {
                                             );
                                         })}
 
-                                    {!isWelcome && (
-                                        <HistoryPane
-                                            records={commandHistory}
-                                            selectedRecordId={selectedRecord?.id || null}
-                                            onSelectRecord={handleSelectRecord}
-                                            onClearHistory={handleClearHistory}
-                                            defaultCollapsed={!historyPaneOpen}
-                                        />
-                                    )}
                                 </div>
                             </div>
 
@@ -1566,20 +1478,6 @@ function App() {
                                 }}
                             >
                                 {t('app.discard')}
-                            </AlertDialogAction>
-                        </AlertDialogFooter>
-                    </AlertDialogContent>
-                </AlertDialog>
-                <AlertDialog open={modal.type === 'confirmClearHistory'} onOpenChange={(open) => { if (!open) setModal({ type: 'none' }); }}>
-                    <AlertDialogContent>
-                        <AlertDialogHeader>
-                            <AlertDialogTitle>{t('app.clearHistoryTitle')}</AlertDialogTitle>
-                            <AlertDialogDescription>{t('app.clearHistoryDescription')}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                            <AlertDialogCancel>{t('app.cancel')}</AlertDialogCancel>
-                            <AlertDialogAction onClick={confirmClearHistory} variant="destructive">
-                                {t('app.delete')}
                             </AlertDialogAction>
                         </AlertDialogFooter>
                     </AlertDialogContent>

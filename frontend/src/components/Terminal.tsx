@@ -135,7 +135,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
               outputLines.push(stripped);
           }
 
-          return outputLines.join('\n').trim();
+          return outputLines.join('\n');
       },
   }));
 
