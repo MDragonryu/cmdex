@@ -97,6 +97,16 @@ Users can organize commands by project context, execute them with variable place
 
 ---
 
+## Current Milestone: v2.1 Terminal Sessions
+
+**Goal:** Enable multiple terminal sessions where commands execute on the user's active (selected) session, allowing long-running CLI processes to run alongside other commands.
+
+**Target features:**
+- Multiple terminal tabs/sessions
+- Execute command on active session
+- Long-running process support (servers, watchers, tails persist)
+- Session management UI (create/close/rename, status)
+
 ## Next Milestone Goals (v2.0)
 
 - **Workspaces** — Named project contexts with sidebar switcher
@@ -136,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-04-24 — v1.4 milestone shipped*
+*Last updated: 2026-06-08 — v2.1 Terminal Sessions milestone started*

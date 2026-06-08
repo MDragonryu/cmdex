@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: milestone
-status: completed
-last_updated: "2026-05-22T08:44:45.502Z"
-last_activity: 2026-05-22 -- Phase 20 marked complete
+milestone: v2.1
+milestone_name: Terminal Sessions
+status: planning
+last_updated: "2026-06-08T05:43:02.309Z"
+last_activity: 2026-06-08
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 ## Current Position
 
-Phase: 20 — COMPLETE
-Plan: 1 of 1
-Status: Phase 20 complete
-Last activity: 2026-05-22 -- Phase 20 marked complete
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-08 — Milestone v2.1 started
 
 ## Performance Metrics
 
