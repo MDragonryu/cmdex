@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: Terminal Sessions
 status: planning
-last_updated: "2026-06-08T05:43:02.309Z"
-last_activity: 2026-06-08
+last_updated: "2026-06-09T05:43:02.309Z"
+last_activity: 2026-06-09
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase 20 — terminal-copy-buttons
+**Current focus:** Phase 21 — Backend Session Foundation
 
 ## Current Position
 
 Phase: Not started (defining requirements)
 Plan: —
 Status: Defining requirements
-Last activity: 2026-06-08 — Milestone v2.1 started
+Last activity: 2026-06-09 — Milestone v2.1 roadmap created
 
 ## Performance Metrics
 
