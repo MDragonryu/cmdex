@@ -77,28 +77,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SESS-01 | Phase 1 | Pending |
-| SESS-02 | Phase 1 | Pending |
-| SESS-03 | Phase 1 | Pending |
-| SESS-04 | Phase 2 | Pending |
-| SESS-05 | Phase 2 | Pending |
-| SESS-06 | Phase 3 | Pending |
-| EXEC-01 | Phase 2 | Pending |
-| EXEC-02 | Phase 2 | Pending |
-| EXEC-03 | Phase 2 | Pending |
-| EXEC-04 | Phase 2 | Pending |
-| EXEC-05 | Phase 2 | Pending |
-| EXEC-06 | Phase 3 | Pending |
-| UI-01 | Phase 3 | Pending |
-| UI-02 | Phase 3 | Pending |
-| UI-03 | Phase 3 | Pending |
-| UI-04 | Phase 3 | Pending |
-| UI-05 | Phase 3 | Pending |
-| UI-06 | Phase 3 | Pending |
-| PERS-01 | Phase 4 | Pending |
-| PERS-02 | Phase 4 | Pending |
-| PERS-03 | Phase 4 | Pending |
-| PERS-04 | Phase 4 | Pending |
+| SESS-01 | Phase 21 | Pending |
+| SESS-02 | Phase 23 | Pending |
+| SESS-03 | Phase 23 | Pending |
+| SESS-04 | Phase 21 | Pending |
+| SESS-05 | Phase 21 | Pending |
+| SESS-06 | Phase 23 | Pending |
+| EXEC-01 | Phase 24 | Pending |
+| EXEC-02 | Phase 24 | Pending |
+| EXEC-03 | Phase 24 | Pending |
+| EXEC-04 | Phase 21 | Pending |
+| EXEC-05 | Phase 24 | Pending |
+| EXEC-06 | Phase 24 | Pending |
+| UI-01 | Phase 23 | Pending |
+| UI-02 | Phase 23 | Pending |
+| UI-03 | Phase 23 | Pending |
+| UI-04 | Phase 23 | Pending |
+| UI-05 | Phase 23 | Pending |
+| UI-06 | Phase 23 | Pending |
+| PERS-01 | Phase 22 | Pending |
+| PERS-02 | Phase 22 | Pending |
+| PERS-03 | Phase 22 | Pending |
+| PERS-04 | Phase 22 | Pending |
 
 **Coverage:**
 - v1 requirements: 22 total

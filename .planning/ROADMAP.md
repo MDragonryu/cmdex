@@ -1,167 +1,133 @@
-# Roadmap: Cmdex v2.0 Terminal Integration
+# Roadmap: Cmdex v2.1 Terminal Sessions
 
-**Milestone:** v2.0
-**Name:** Terminal Integration
-**Goal:** Replace the static output pane with an xterm.js-based PTY terminal with full ANSI support, interactive input, and freeform command typing in a split-pane layout.
-
----
-
-## Phase 16: PTY Backend Foundation
-
-**Goal:** A persistent shell process runs in a Go-managed PTY with bidirectional I/O, resize support, and clean lifecycle management. The frontend can send keystrokes and receive output via Wails events.
-
-**Requirements:** PTY-01, PTY-02, PTY-03, PTY-04, PTY-05, PTY-06, POL-05
-
-**Success criteria:**
-1. Shell spawns in PTY on app startup (bash on macOS/Linux, powershell/cmd on Windows)
-2. Keystrokes sent from Go to PTY stdin produce correct shell echo in PTY output
-3. PTY output streams via Wails events with 16ms batching and 64KB max chunks per emit
-4. Calling `pty.Setsize` with new cols/rows changes shell dimensions (verify via `tput cols; tput lines`)
-5. App shutdown kills the shell process group — no orphaned bash/cmd processes
-6. Shell exit (user types `exit` or receives Ctrl+D) is detected and reported
-7. Shell auto-detection correctly picks bash on macOS/Linux and powershell/cmd on Windows
-
-<details>
-<summary>Plans (3 plans)</summary>
-
-- [x] 16-01-PLAN.md — TerminalService struct, service registration, event constants, Unix PTY lifecycle (creack/pty), Windows stubs, shell detection (Wave 1)
-- [x] 16-02-PLAN.md — PTY output streaming with 16ms batching, 64KB chunks, pty-output/pty-exit events, shell exit detection, auto-restart (Wave 2)
-- [x] 16-03-PLAN.md — Test suite for all 7 requirements, Windows go-winpty integration, package legitimacy gate (Wave 2)
-
-</details>
+**Milestone:** v2.1
+**Name:** Terminal Sessions
+**Goal:** Enable multiple terminal sessions where commands execute on the user's active (selected) session, allowing long-running CLI processes to run alongside other commands.
 
 ---
 
-## Phase 17: xterm.js Terminal and Split Pane Layout
+## Phase 21: Backend Session Foundation
 
-**Goal:** The current OutputPane is replaced by an xterm.js Terminal component in a split pane layout. The terminal renders PTY output, auto-fits to container size, and stays mounted across tab switches.
+**Goal:** Backend can manage multiple terminal sessions with isolated PTYs, and long-running processes persist across session switches.
 
-**Requirements:** TERM-01, TERM-02, TERM-03, TERM-04, LAY-01, LAY-02, LAY-04
+**Depends on:** v2.0 Terminal Integration (phases 16-20 complete)
 
-**Success criteria:**
-1. xterm.js terminal renders in the bottom pane with ANSI color support (verify via `ls --color`)
-2. FitAddon resizes terminal when window or divider is resized — no scrollbar gaps
-3. WebglAddon activates on supported hardware, falls back gracefully to canvas renderer
-4. URLs in terminal output are underlined and clickable (WebLinksAddon)
-5. Layout is a vertical split: command editor on top, terminal on bottom, with drag-to-resize divider
-6. Switching command tabs does not unmount the Terminal component (CSS display toggle, not React unmount)
-7. The old OutputPane toggle behavior is fully removed from App.tsx
+**Requirements:** SESS-01, SESS-04, SESS-05, EXEC-04
 
-**Plans:** 4 plans in 3 waves
+**Success Criteria** (what must be TRUE):
+1. Backend can create a new terminal session with a default name and return its session ID
+2. Backend can list all active sessions with their metadata (name, status, working directory, shell)
+3. Backend can rename a session by ID
+4. Backend can close a session by ID, cleaning up its PTY and process group
+5. When switching active session, the previous session's PTY process continues running (verify: `sleep 30` in session A, switch to B, session A still running)
+6. Namespaced events (`pty-output:{sessionId}`, `pty-exit:{sessionId}`, `pty-cleared:{sessionId}`) route output correctly per session
+7. SessionService uses a mutex-protected map — no global state collision
 
-<details>
-<summary>Plans (Wave 1)</summary>
+**Plans:** TBD
 
-- [x] 17-01-PLAN.md — Install xterm.js packages, create Terminal.tsx with FitAddon/WebglAddon/WebLinksAddon, add terminal CSS
-
-</details>
-
-<details>
-<summary>Plans (Wave 2)</summary>
-
-- [x] 17-02-PLAN.md — Remove OutputPane from App.tsx (state, imports, shortcuts), add split pane layout with useResizable divider + Terminal component
-- [x] 17-03-PLAN.md — Add ptyOutput/ptyExit to events.ts, regenerate Wails bindings, subscribe to pty-output/pty-exit events in Terminal.tsx
-
-</details>
-
-<details>
-<summary>Plans (Wave 3 — Gap Closure)</summary>
-
-- [ ] 17-04-PLAN.md — Route RunCommand output to xterm.js terminal via cmd-output event subscription (gap closure: UAT Test 5)
-
-</details>
+**UI hint**: no
 
 ---
 
-## Phase 18: Execution Integration and Interactivity
+## Phase 22: Database Persistence
 
-**Goal:** Clicking Run writes the resolved command to the terminal. Users can type commands freely. Ctrl+C interrupts running processes. Working directory is respected.
+**Goal:** Terminal sessions persist across app restarts with all metadata restored and active session remembered.
 
-**Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-04, LAY-03
+**Depends on:** Phase 21
 
-**Success criteria:**
-1. Clicking Run on a saved command writes resolved command text + newline to PTY stdin via TerminalService.Write
-2. Command output appears in the terminal with full ANSI rendering (replaces static OutputPane)
-3. User can type any custom command directly in the terminal and execute it freely
-4. Ctrl+C sends SIGINT and interrupts the foreground process (verify with `sleep 30` then Ctrl+C)
-5. Shell starts in or changes to the command's resolved working directory when a command is loaded
-6. Clear button resets the terminal scrollback buffer
+**Requirements:** PERS-01, PERS-02, PERS-03, PERS-04
 
-<details>
-<summary>Plans (3 plans — 2 built + 1 gap closure)</summary>
+**Success Criteria** (what must be TRUE):
+1. On app startup, previous sessions are loaded from SQLite and available via SessionService
+2. Session metadata (name, working directory, shell) is correctly restored for each session
+3. The previously active session is marked active and auto-selected in the tab bar
+4. Working directory fallback chain works: per-command → global default → OS home
 
-- [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
-- [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
-- [x] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
+**Plans:** TBD
 
-</details>
+**UI hint**: no
 
 ---
 
-## Phase 19: Terminal Polish
+## Phase 23: Frontend Tabbed Terminal
 
-**Goal:** Terminal theme syncs with Cmdex themes, font matches app font, copy/paste works per-platform, and the terminal feels native. (SearchAddon deferred per D-09 to a future phase.)
+**Goal:** Users can manage and interact with multiple terminal sessions through a tabbed interface with full keyboard and mouse support.
 
-**Requirements:** POL-01, POL-02, POL-03, POL-04
+**Depends on:** Phase 21, Phase 22
 
-**Success criteria:**
-1. Switching Cmdex themes updates xterm terminal theme in real time with no flicker
-2. Terminal font family updates when user changes font in Settings
-3. Cmd+C / Ctrl+Shift+C copies selected text from terminal
-4. Cmd+V / Ctrl+Shift+V pastes clipboard text into terminal
+**Requirements:** SESS-02, SESS-03, SESS-06, UI-01, UI-02, UI-03, UI-04, UI-05, UI-06
 
-**Plans:** 1 plan in 1 wave
+**Success Criteria** (what must be TRUE):
+1. User sees a tab bar listing all terminal sessions with names
+2. User can switch sessions by clicking tabs — terminal output updates instantly
+3. User can reorder tabs via drag-and-drop
+4. Each tab shows session name and status indicator (idle/running/busy)
+5. Right-clicking a tab shows context menu with rename, close, duplicate options
+6. Keyboard shortcuts work: Ctrl+T (new), Ctrl+W (close), Ctrl+Tab (next), Ctrl+Shift+Tab (prev)
+7. Each session preserves 5000 lines of scrollback independently
+8. Terminal theme matches app theme via CSS variables (no hardcoded colors)
+9. Clear button clears only the active session's terminal
 
-<details>
-<summary>Plans (Wave 1)</summary>
+**Plans:** TBD
 
-- [x] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
-
-</details>
+**UI hint**: yes
 
 ---
 
-## Phase 20: Terminal Copy Buttons
+## Phase 24: Session-Aware Execution
 
-**Goal:** Add copy buttons to the terminal toolbar — one to copy the last executed command text, one to copy selected terminal output.
+**Goal:** Users can execute saved commands in the active terminal session with full variable resolution, working directory support, and real-time output streaming.
 
-**Requirements:** CPY-01, CPY-02
+**Depends on:** Phase 21, Phase 23
 
-**Success criteria:**
-1. Copy Command button copies the full resolved command text (including `cd` working directory prefix) to clipboard
-2. Copy Output button copies currently selected terminal text to clipboard, or all visible output if nothing is selected
-3. Buttons are accessible in the terminal toolbar alongside Clear
-4. Clipboard write uses `navigator.clipboard.writeText` with a toast confirmation
+**Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-05, EXEC-06
 
-**Plans:** 1 plan in 1 wave
+**Success Criteria** (what must be TRUE):
+1. Clicking Run on a saved command executes it in the active session's terminal
+2. Command variables (CEL defaults, env, prompts) are resolved before sending to session
+3. Command working directory is applied (per-command → global default → session cwd)
+4. Command output streams to the active session's terminal in real-time with ANSI support
+5. User can press Ctrl+C to interrupt a running command in the active session
 
-<details>
-<summary>Plans (Wave 1)</summary>
+**Plans:** TBD
 
-- [ ] 20-01-PLAN.md — Emit cmd-executing event from Go, add Copy Command + Copy Output buttons to terminal toolbar
+**UI hint**: no
 
-</details>
+---
+
+## Phase 25: Polish & Integration
+
+**Goal:** All session features work cohesively with settings, persistence, edge cases handled, and cross-platform verified.
+
+**Depends on:** Phase 22, Phase 23, Phase 24
+
+**Requirements:** (integrates all prior — no new requirements)
+
+**Success Criteria** (what must be TRUE):
+1. Sessions created via UI persist across app restarts and restore correctly (end-to-end)
+2. Session working directory integrates with global default setting from Settings window
+3. Active session selection persists across restarts
+4. No memory leaks: rapid create/close cycles don't leak xterm instances or PTY processes
+5. Windows conpty compatibility verified (PTY spawn, resize, I/O, shell detection)
+
+**Plans:** TBD
+
+**UI hint**: no
 
 ---
 
 ## Progress
 
-| Phase | Milestone | Requirements | Status |
-|-------|-----------|-------------|--------|
-| 1-5 | v1.0 Premium Polish | — | Shipped 2026-04-13 |
-| 6-7 | v1.1 Build Settings Window | — | Shipped |
-| 8-9 | v1.2 DB Migration Refactor | — | Shipped |
-| 10-13 | v1.3 Working Directory | 14 | Shipped 2026-04-23 |
-| 14 | v1.4 Editor Multi-Mount Refactor | — | Shipped 2026-04-23 |
-| 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
-| 16 | 3/3 | Complete   | 2026-05-19 |
-| 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
-| 18 | 3/3 | Complete   | 2026-05-21 |
-| 19 | 1/1 | Complete   | 2026-05-22 |
-| 20 | 0/1 | Planned |
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 21. Backend Session Foundation | 0/0 | Not started | - |
+| 22. Database Persistence | 0/0 | Not started | - |
+| 23. Frontend Tabbed Terminal | 0/0 | Not started | - |
+| 24. Session-Aware Execution | 0/0 | Not started | - |
+| 25. Polish & Integration | 0/0 | Not started | - |
 
-**Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
+**Execution order:** 21 → 22 → 23 → 24 → 25 (serial — each phase depends on the prior)
 
 ---
 
-*Last updated: 2026-05-18*
+*Last updated: 2026-06-09*
