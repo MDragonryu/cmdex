@@ -1,0 +1,196 @@
+import React, { useRef, useEffect } from 'react';
+import { GripVertical, Plus, X } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from '@/components/ui/context-menu';
+import { type SessionInfo } from '../types';
+
+interface TerminalTabBarProps {
+  sessions: SessionInfo[];
+  activeSessionId: string;
+  onSelectTab: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onReorderTabs: (sessions: SessionInfo[]) => void;
+  onCreateSession: () => void;
+  onRenameSession: (id: string, name: string) => void;
+}
+
+interface SortableTerminalTabProps {
+  session: SessionInfo;
+  isActive: boolean;
+  isLastTab: boolean;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+}
+
+function SortableTerminalTab({
+  session,
+  isActive,
+  isLastTab,
+  onSelect,
+  onClose,
+  onRename,
+}: SortableTerminalTabProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: session.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const handleRename = () => {
+    const newName = window.prompt('Rename session:', session.name);
+    if (newName !== null && newName.trim() !== '') {
+      onRename(session.id, newName.trim());
+    }
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          ref={setNodeRef}
+          style={style}
+          className={`tab-item${isActive ? ' active' : ''}`}
+          onClick={() => onSelect(session.id)}
+        >
+          <span className="tab-drag-handle" {...attributes} {...listeners}>
+            <GripVertical size={12} />
+          </span>
+          <span
+            className={`tab-status-dot ${session.running ? 'running' : 'stopped'}`}
+          />
+          <span className="tab-title" title={session.name}>
+            {session.name}
+          </span>
+          {!isLastTab && (
+            <span
+              className="tab-close"
+              role="button"
+              aria-label={`Close ${session.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(session.id);
+              }}
+            >
+              <X size={12} />
+            </span>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={handleRename}>
+          Rename Session
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={isLastTab}
+          onSelect={() => onClose(session.id)}
+        >
+          Close Session
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+export default function TerminalTabBar({
+  sessions,
+  activeSessionId,
+  onSelectTab,
+  onCloseTab,
+  onReorderTabs,
+  onCreateSession,
+  onRenameSession,
+}: TerminalTabBarProps) {
+  const activeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [activeSessionId]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = sessions.findIndex((s) => s.id === String(active.id));
+    const newIndex = sessions.findIndex((s) => s.id === String(over.id));
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      onReorderTabs(arrayMove(sessions, oldIndex, newIndex));
+    }
+  };
+
+  if (sessions.length === 0) return null;
+
+  const isLastTab = sessions.length <= 1;
+
+  return (
+    <div className="tab-bar">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={sessions.map((s) => s.id)}
+          strategy={horizontalListSortingStrategy}
+        >
+          {sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            return (
+              <SortableTerminalTab
+                key={session.id}
+                session={session}
+                isActive={isActive}
+                isLastTab={isLastTab}
+                onSelect={onSelectTab}
+                onClose={onCloseTab}
+                onRename={onRenameSession}
+              />
+            );
+          })}
+        </SortableContext>
+      </DndContext>
+      <div
+        className="tab-new-session-btn"
+        role="button"
+        aria-label="Create new terminal session"
+        title="New Session (Ctrl+T)"
+        onClick={onCreateSession}
+      >
+        <Plus size={14} />
+      </div>
+    </div>
+  );
+}
