@@ -180,7 +180,7 @@ func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
 
 	s := &TerminalService{}
 	_ = s.ServiceStartup(nil, application.ServiceOptions{})
-	defer s.Stop()
+	defer s.ServiceShutdown()
 
 	if terminalSvc == nil {
 		t.Error("terminalSvc should be non-nil after ServiceStartup, got nil")
