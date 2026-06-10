@@ -19,6 +19,8 @@ todos/
 
 !.planning/PROJECT.md
 !.planning/ROADMAP.md
+!.planning/REQUIREMENTS.md
+!.planning/phases/
 !.planning/codebase/
 
 .claude/settings.local.json
