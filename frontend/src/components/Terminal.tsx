@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 interface TerminalComponentProps {
   isVisible: boolean;
   theme: string;
+  sessionId: string;
   onShellExit?: () => void;
 }
 
@@ -22,7 +23,7 @@ export interface TerminalHandle {
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ isVisible, theme, onShellExit }, ref) => {
+    ({ isVisible, theme, sessionId, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -46,7 +47,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           terminalRef.current?.clear();
           return;
         }
-        Clear().catch((err) => {
+        Clear(sessionId).catch((err) => {
           console.error('clear failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -220,7 +221,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       term.open(containerRef.current);
       requestAnimationFrame(() => {
         fitAddon.fit();
-        Start(term.cols, term.rows).catch((err) => {
+        Start(sessionId, term.cols, term.rows).catch((err) => {
           console.error('terminal start failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -237,7 +238,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const inputDisposable = term.onData((data) => {
       if (!backendAvailableRef.current) return;
-      Write(data).catch((err) => {
+      Write(sessionId, data).catch((err) => {
         console.error('TerminalService.Write failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -247,7 +248,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (!backendAvailableRef.current) return;
-      Resize(cols, rows).catch((err) => {
+      Resize(sessionId, cols, rows).catch((err) => {
         console.error('resize failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -262,7 +263,11 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       observer.observe(containerRef.current);
     }
 
-    const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
+    const ptyOutputEvent = 'pty-output:' + sessionId;
+    const ptyExitEvent = 'pty-exit:' + sessionId;
+    const ptyClearedEvent = 'pty-cleared:' + sessionId;
+
+    const cleanupOutput = Events.On(ptyOutputEvent, (event: { data: { data: string } }) => {
       const output = event?.data?.data;
       if (output) {
         backendAvailableRef.current = true;
@@ -273,7 +278,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       }
     });
 
-    const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
+    const cleanupExit = Events.On(ptyExitEvent, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
       const { exitCode, wasIntentional } = event?.data ?? {};
       if (process.env.NODE_ENV === 'development') {
         console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
@@ -283,14 +288,14 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       }
     });
 
-    const cleanupCleared = Events.On(eventNames.ptyCleared, () => {
+    const cleanupCleared = Events.On(ptyClearedEvent, () => {
       terminalRef.current?.clear();
     });
 
     const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
       const cmdLine = event?.data?.data;
       if (cmdLine && backendAvailableRef.current) {
-        Write(cmdLine).catch((err) => {
+        Write(sessionId, cmdLine).catch((err) => {
           console.error('TerminalService.Write failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -313,7 +318,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
         fitAddonRef.current = null;
       }
     };
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     const term = terminalRef.current;

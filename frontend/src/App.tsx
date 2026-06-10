@@ -75,6 +75,7 @@ import {
     GetVariables,
     RunCommand,
 } from '../bindings/cmdex/executionservice';
+import { GetActiveSession } from '../bindings/cmdex/terminalservice';
 import i18n from './i18n';
 import {
     emptyDraft,
@@ -171,6 +172,8 @@ function App() {
         return localStorage.getItem(`${TERM_STORAGE_KEY}-collapsed`) === 'true';
     });
 
+    const [activeSessionId, setActiveSessionId] = useState<string>('');
+
     const collapseTerminal = useCallback(() => {
         setTerminalCollapsed(true);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'true');
@@ -234,6 +237,11 @@ function App() {
 
     useEffect(() => {
         initEventNames().then(() => setEventsInitialized(true));
+        GetActiveSession().then((info) => {
+            if (info) {
+                setActiveSessionId(info.id);
+            }
+        }).catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -1403,6 +1411,7 @@ function App() {
                                     ref={terminalRef}
                                     isVisible={!terminalCollapsed}
                                     theme={theme}
+                                    sessionId={activeSessionId}
                                     onShellExit={collapseTerminal}
                                 />
                                 {terminalCollapsed && (
