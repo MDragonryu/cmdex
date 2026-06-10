@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.1
-milestone_name: Terminal Sessions
+milestone_name: milestone
 status: planning
-last_updated: "2026-06-10T05:29:40.426Z"
+last_updated: "2026-06-10T07:18:21.391Z"
 last_activity: 2026-06-10 — Phase 21 context gathered
 progress:
   total_phases: 5

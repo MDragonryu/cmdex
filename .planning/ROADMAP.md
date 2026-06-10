@@ -15,6 +15,7 @@
 **Requirements:** SESS-01, SESS-04, SESS-05, EXEC-04
 
 **Success Criteria** (what must be TRUE):
+
 1. Backend can create a new terminal session with a default name and return its session ID
 2. Backend can list all active sessions with their metadata (name, status, working directory, shell)
 3. Backend can rename a session by ID
@@ -24,8 +25,8 @@
 7. SessionService uses a mutex-protected map — no global state collision
 
 **Plans:** 3 plans
-
 Plans:
+
 - [ ] 21-01-PLAN.md — Session types, struct refactoring, CRUD API (CreateSession, ListSessions, CloseSession, RenameSession, active session)
 - [ ] 21-02-PLAN.md — Per-session PTY lifecycle, namespaced events, ServiceStartup/Shutdown
 - [ ] 21-03-PLAN.md — Frontend event wiring, Wails bindings, multi-session Go tests
@@ -43,6 +44,7 @@ Plans:
 **Requirements:** PERS-01, PERS-02, PERS-03, PERS-04
 
 **Success Criteria** (what must be TRUE):
+
 1. On app startup, previous sessions are loaded from SQLite and available via SessionService
 2. Session metadata (name, working directory, shell) is correctly restored for each session
 3. The previously active session is marked active and auto-selected in the tab bar
@@ -63,6 +65,7 @@ Plans:
 **Requirements:** SESS-02, SESS-03, SESS-06, UI-01, UI-02, UI-03, UI-04, UI-05, UI-06
 
 **Success Criteria** (what must be TRUE):
+
 1. User sees a tab bar listing all terminal sessions with names
 2. User can switch sessions by clicking tabs — terminal output updates instantly
 3. User can reorder tabs via drag-and-drop
@@ -88,6 +91,7 @@ Plans:
 **Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-05, EXEC-06
 
 **Success Criteria** (what must be TRUE):
+
 1. Clicking Run on a saved command executes it in the active session's terminal
 2. Command variables (CEL defaults, env, prompts) are resolved before sending to session
 3. Command working directory is applied (per-command → global default → session cwd)
@@ -109,6 +113,7 @@ Plans:
 **Requirements:** (integrates all prior — no new requirements)
 
 **Success Criteria** (what must be TRUE):
+
 1. Sessions created via UI persist across app restarts and restore correctly (end-to-end)
 2. Session working directory integrates with global default setting from Settings window
 3. Active session selection persists across restarts
