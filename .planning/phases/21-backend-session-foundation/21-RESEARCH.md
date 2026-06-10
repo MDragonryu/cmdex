@@ -628,22 +628,22 @@ func (ss *sessionState) info() *SessionInfo {
 | A4 | `detectShell()` call per session is correct — all sessions use the same shell | Standard Stack | Future feature may want per-session shell override. Current design is correct per discussion scope. |
 | A5 | Default session counter starting at 1 and never resetting is acceptable (per discretion) | Architecture Patterns | If user expects counter to reset on app restart, Phase 22 persistence would need to save/resume counter. In-memory counter resets with app — this is expected behavior per D-06. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Terminal.tsx be updated in Phase 21 or deferred to Phase 23?**
    - What we know: Removing `PtyOutput`/`PtyExit`/`PtyCleared` from `EventNames` breaks `Terminal.tsx:265-288`. The component imports `eventNames.ptyOutput` etc.
    - What's unclear: Whether Phase 21 should update Terminal.tsx to accept `sessionId` and subscribe to namespaced events, or leave it broken until Phase 23.
-   - Recommendation: Include a minimal Terminal.tsx update in Phase 21 — add `sessionId` prop, subscribe to namespaced events, keep a single TerminalComponent instance for backward compatibility until Phase 23 adds TerminalTabs. This avoids broken intermediate state.
+   - RESOLVED: Include a minimal Terminal.tsx update in Phase 21 — add `sessionId` prop, subscribe to namespaced events, keep a single TerminalComponent instance for backward compatibility until Phase 23 adds TerminalTabs. This avoids broken intermediate state.
 
 2. **What is the `getWorkingDir()` value for new sessions?**
    - What we know: `SessionInfo.WorkingDir` is required per the agent's Discretion. The existing codebase doesn't have a global working directory for terminal sessions.
    - What's unclear: Whether to use the app's `DefaultWorkingDir` from `AppSettings`, the current OS home directory, or leave empty.
-   - Recommendation: Use OS home directory (`os.UserHomeDir()`) as fallback for Phase 21. Phase 22 can refine to use the full fallback chain (per-command → global default → OS home).
+   - RESOLVED: Use OS home directory (`os.UserHomeDir()`) as fallback for Phase 21. Phase 22 can refine to use the full fallback chain (per-command → global default → OS home).
 
 3. **Should `TerminalService` expose `sessionState` types to the frontend?**
    - What we know: Wails bindings require exported types. `SessionInfo` is exported. `sessionState` is internal.
    - What's unclear: Whether the Wails binding generator will correctly handle the new method signatures with `sessionId string` parameter and `*SessionInfo` return type.
-   - Recommendation: Export `SessionInfo` struct with JSON tags. Keep `sessionState` unexported (internal). All public methods return `*SessionInfo` or `[]*SessionInfo`. Test with `wails3 generate build-assets` after implementation.
+   - RESOLVED: Export `SessionInfo` struct with JSON tags. Keep `sessionState` unexported (internal). All public methods return `*SessionInfo` or `[]*SessionInfo`. Test with `wails3 generate build-assets` after implementation.
 
 ## Environment Availability
 
