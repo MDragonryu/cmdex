@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -172,6 +173,15 @@ func (s *TerminalService) CreateSession() (*SessionInfo, error) {
 		s.activeSessionID = id
 	}
 
+	// Start emitter goroutine for output batching.
+	ss.startEmitter()
+
+	// Start the PTY shell. startSessionLocked acquires ss.mu internally;
+	// s.mu is already held — startSessionLocked uses only ss.mu.
+	if err := s.startSessionLocked(ss, 80, 24); err != nil {
+		return nil, err
+	}
+
 	return ss.info(), nil
 }
 
@@ -206,10 +216,27 @@ func (s *TerminalService) CloseSession(id string) error {
 			break
 		}
 	}
+
+	// Snapshot PTY resources under lock before releasing.
+	ss.mu.Lock()
+	ss.stopSessionLocked()
+	oldPtmx := ss.ptmx
+	oldCmd := ss.cmd
+	ss.ptmx = nil
+	ss.cmd = nil
+	ss.running = false
+	ss.mu.Unlock()
 	s.mu.Unlock()
 
-	// TODO(Plan 02): call ss.stopSession() to kill PTY and wait for goroutines
-	_ = ss
+	// Kill PTY and wait for goroutines (no locks held — prevents deadlock).
+	if oldPtmx != nil {
+		oldPtmx.Close()
+	}
+	if oldCmd != nil {
+		killProcessGroup(oldCmd)
+	}
+	ss.readerWg.Wait()
+	ss.stopEmitter()
 
 	return nil
 }
@@ -261,4 +288,373 @@ func (s *TerminalService) GetActiveSession() *SessionInfo {
 		return nil
 	}
 	return ss.info()
+}
+
+// ========== Per-Session PTY Lifecycle ==========
+
+// startSessionLocked starts a PTY shell for the given session.
+// ss.mu MUST be held by the caller. TerminalService.mu is NOT held.
+func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) error {
+	if ss.starting {
+		return nil
+	}
+	ss.starting = true
+
+	// Clamp minimum dimensions.
+	if cols < 10 {
+		cols = 80
+	}
+	if rows < 3 {
+		rows = 24
+	}
+
+	// Clean up any previous PTY.
+	ss.stopSessionLocked()
+
+	oldPtmx := ss.ptmx
+	oldCmd := ss.cmd
+	ss.ptmx = nil
+	ss.cmd = nil
+	ss.running = false
+	ss.intentionalStop = false
+
+	shellPath, shellFlag := detectShell()
+
+	// CRITICAL: unlock before blocking operations to prevent deadlock.
+	ss.mu.Unlock()
+
+	if oldPtmx != nil {
+		oldPtmx.Close()
+	}
+	if oldCmd != nil {
+		killProcessGroup(oldCmd)
+	}
+	ss.readerWg.Wait()
+
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, rows, cols)
+
+	ss.mu.Lock()
+	ss.starting = false
+
+	if err != nil {
+		return err
+	}
+
+	ss.shellPath = shellPath
+	ss.shellFlag = shellFlag
+	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
+	ss.ptmx = ptmx
+	ss.cmd = cmd
+	ss.stopCh = make(chan struct{})
+	ss.running = true
+
+	stopCh := ss.stopCh
+	ss.readerWg.Add(1)
+	go ss.readLoop(ptmx, stopCh)
+	go s.monitorExit(ss, cmd, ptmx, stopCh)
+
+	return nil
+}
+
+// stopSessionLocked signals the session's goroutines to stop by closing stopCh.
+// ss.mu MUST be held by the caller.
+func (ss *sessionState) stopSessionLocked() {
+	if ss.stopCh != nil {
+		close(ss.stopCh)
+		ss.stopCh = nil
+	}
+}
+
+// readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to enqueueOutput.
+func (ss *sessionState) readLoop(ptmx *os.File, stopCh chan struct{}) {
+	defer ss.readerWg.Done()
+
+	buf := make([]byte, 8192)
+	var leftover []byte
+
+	for {
+		select {
+		case <-stopCh:
+			if len(leftover) > 0 {
+				ss.enqueueOutput(string(leftover))
+			}
+			return
+		default:
+		}
+
+		n, err := ptmx.Read(buf)
+		if err != nil {
+			if len(leftover) > 0 {
+				ss.enqueueOutput(string(leftover))
+			}
+			return
+		}
+
+		data := make([]byte, n+len(leftover))
+		copy(data, leftover)
+		copy(data[len(leftover):], buf[:n])
+		leftover = nil
+
+		// Find last valid UTF-8 boundary to avoid splitting multi-byte sequences.
+		validEnd := len(data)
+		for validEnd > 0 {
+			if validEnd >= 2 && data[validEnd-2]&0xC0 == 0xC0 {
+				break
+			}
+			if validEnd >= 3 && data[validEnd-3]&0xE0 == 0xE0 {
+				break
+			}
+			if validEnd >= 4 && data[validEnd-4]&0xF0 == 0xF0 {
+				break
+			}
+			validEnd--
+		}
+
+		if validEnd < len(data) {
+			leftover = make([]byte, len(data)-validEnd)
+			copy(leftover, data[validEnd:])
+			data = data[:validEnd]
+		}
+
+		if len(data) > 0 {
+			ss.enqueueOutput(string(data))
+		}
+	}
+}
+
+// startEmitter creates the output channel and starts the batching emitter goroutine.
+func (ss *sessionState) startEmitter() {
+	ss.outputCh = make(chan string, 512)
+	ss.emitterWg.Add(1)
+
+	go func() {
+		defer ss.emitterWg.Done()
+
+		var buf bytes.Buffer
+		ticker := time.NewTicker(8 * time.Millisecond)
+		defer ticker.Stop()
+
+		flush := func() {
+			if buf.Len() == 0 {
+				return
+			}
+			seq := atomic.AddUint64(&ss.outputSeq, 1)
+			if wailsApp != nil {
+				wailsApp.Event.Emit("pty-output:"+ss.id, map[string]interface{}{
+					"data": buf.String(),
+					"seq":  seq,
+				})
+			}
+			buf.Reset()
+		}
+
+		for {
+			select {
+			case data, ok := <-ss.outputCh:
+				if !ok {
+					flush()
+					return
+				}
+				buf.WriteString(data)
+				if buf.Len() >= 32768 {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
+			}
+		}
+	}()
+}
+
+// stopEmitter closes the output channel and waits for the emitter goroutine to finish.
+func (ss *sessionState) stopEmitter() {
+	if ss.outputCh != nil {
+		close(ss.outputCh)
+	}
+	ss.emitterWg.Wait()
+	ss.outputCh = nil
+}
+
+// enqueueOutput sends data to the output channel non-blocking.
+func (ss *sessionState) enqueueOutput(data string) {
+	select {
+	case ss.outputCh <- data:
+	default:
+		count := ss.droppedCount.Add(1)
+		if count%100 == 1 {
+			fmt.Printf("pty output queue full (session %s), dropped %d times\n", ss.id, count)
+		}
+	}
+}
+
+// monitorExit watches for shell exit and handles event emission and auto-restart.
+func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx *os.File, stopCh chan struct{}) {
+	err := cmd.Wait()
+
+	select {
+	case <-stopCh:
+		return
+	default:
+	}
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	ss.mu.Lock()
+	intentional := ss.intentionalStop || exitCode == 0
+	cols := int(ss.lastSize.Cols)
+	rows := int(ss.lastSize.Rows)
+	ss.mu.Unlock()
+
+	if wailsApp != nil {
+		wailsApp.Event.Emit("pty-exit:"+ss.id, map[string]interface{}{
+			"exitCode":       exitCode,
+			"wasIntentional": intentional,
+		})
+	}
+
+	if intentional {
+		ss.mu.Lock()
+		ss.running = false
+		ss.mu.Unlock()
+		return
+	}
+
+	// Unintentional exit (crash) — auto-restart after brief delay.
+	time.Sleep(100 * time.Millisecond)
+	s.Start(ss.id, cols, rows)
+}
+
+// ========== Session Dispatch Methods ==========
+
+// Write sends input data to the specified session's PTY.
+func (s *TerminalService) Write(sessionId string, data string) error {
+	ss, err := s.resolveSession(sessionId)
+	if err != nil {
+		return err
+	}
+
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if !ss.running {
+		if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
+			return err
+		}
+	}
+
+	if ss.ptmx == nil {
+		return fmt.Errorf("terminal not started")
+	}
+
+	b := []byte(data)
+	for len(b) > 0 {
+		n, err := ss.ptmx.Write(b)
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
+}
+
+// Resize changes the terminal dimensions for the specified session.
+func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
+	if cols < 1 || cols > 65535 || rows < 1 || rows > 65535 {
+		return fmt.Errorf("Resize: invalid dimensions cols=%d rows=%d (must be 1..65535)", cols, rows)
+	}
+
+	ss, err := s.resolveSession(sessionId)
+	if err != nil {
+		return err
+	}
+
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.ptmx == nil {
+		return fmt.Errorf("terminal not started")
+	}
+
+	ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
+	return ptyResize(ss.ptmx, cols, rows)
+}
+
+// Clear sends the ANSI clear sequence and emits a namespaced clear event.
+func (s *TerminalService) Clear(sessionId string) error {
+	ss, err := s.resolveSession(sessionId)
+	if err != nil {
+		return err
+	}
+
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.ptmx == nil {
+		return fmt.Errorf("terminal not started")
+	}
+
+	clearSeq := "\x1b[H\x1b[2J\x1b[3J"
+	b := []byte(clearSeq)
+	for len(b) > 0 {
+		n, err := ss.ptmx.Write(b)
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+
+	if wailsApp != nil {
+		wailsApp.Event.Emit("pty-cleared:"+ss.id, nil)
+	}
+
+	return nil
+}
+
+// Start starts the PTY shell for the specified session.
+func (s *TerminalService) Start(sessionId string, cols, rows int) error {
+	ss, err := s.resolveSession(sessionId)
+	if err != nil {
+		return err
+	}
+
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	return s.startSessionLocked(ss, cols, rows)
+}
+
+// Stop stops the PTY shell for the specified session.
+func (s *TerminalService) Stop(sessionId string) error {
+	ss, err := s.resolveSession(sessionId)
+	if err != nil {
+		return err
+	}
+
+	ss.mu.Lock()
+	ss.intentionalStop = true
+	ss.stopSessionLocked()
+
+	oldPtmx := ss.ptmx
+	oldCmd := ss.cmd
+	ss.ptmx = nil
+	ss.cmd = nil
+	ss.running = false
+	ss.mu.Unlock()
+
+	if oldPtmx != nil {
+		oldPtmx.Close()
+	}
+	if oldCmd != nil {
+		killProcessGroup(oldCmd)
+	}
+	ss.readerWg.Wait()
+
+	return nil
 }
