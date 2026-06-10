@@ -637,6 +637,53 @@ body {
   background: var(--foreground);
 }
 
+.tab-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.tab-status-dot.running {
+  background: var(--success);
+}
+
+.tab-status-dot.stopped {
+  background: var(--muted-foreground);
+}
+
+.tab-drag-handle {
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  padding-right: 2px;
+  flex-shrink: 0;
+  touch-action: none;
+}
+
+.tab-drag-handle:active {
+  cursor: grabbing;
+}
+
+.tab-new-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  border-left: 1px solid var(--border);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.tab-new-session-btn:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--tab-active-bg) 60%, var(--tab-inactive-bg));
+}
+
 /* ========== Sidebar ========== */
 
 .sidebar {
