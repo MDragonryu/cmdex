@@ -76,7 +76,11 @@ Plans:
 8. Terminal theme matches app theme via CSS variables (no hardcoded colors)
 9. Clear button clears only the active session's terminal
 
-**Plans:** TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 23-01-PLAN.md — TerminalTabBar component with drag-and-drop reorder, right-click context menu, status indicators, SessionInfo type, CSS
+- [ ] 23-02-PLAN.md — App.tsx session state management, multi-mount TerminalComponents, TerminalTabBar wiring, clear/copy button refactor
+- [ ] 23-03-PLAN.md — Keyboard shortcuts with focus-dependent dispatch (Ctrl+T/W/Tab/Shift+Tab) for terminal vs command tabs
 
 **UI hint**: yes
 
@@ -132,7 +136,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 21. Backend Session Foundation | 0/3 | Not started | - |
 | 22. Database Persistence | 0/0 | Not started | - |
-| 23. Frontend Tabbed Terminal | 0/0 | Not started | - |
+| 23. Frontend Tabbed Terminal | 0/3 | Not started | - |
 | 24. Session-Aware Execution | 0/0 | Not started | - |
 | 25. Polish & Integration | 0/0 | Not started | - |
 
@@ -140,4 +144,4 @@ Plans:
 
 ---
 
-*Last updated: 2026-06-09*
+*Last updated: 2026-06-10*
