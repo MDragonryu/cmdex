@@ -245,6 +245,17 @@ function App() {
         setSessions(reordered);
     }, []);
 
+    // Focus detection: returns true if keyboard focus is inside the terminal pane
+    // (including the xterm.js hidden textarea used for keyboard input)
+    const isFocusInTerminalPane = useCallback((): boolean => {
+        const el = document.activeElement;
+        if (!el) return false;
+        return !!(
+            (el as HTMLElement).closest?.('.terminal-pane') ||
+            (el as HTMLElement).closest?.('.xterm-helper-textarea')
+        );
+    }, []);
+
     const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         handleStart(e.clientY);
@@ -1248,7 +1259,13 @@ function App() {
         },
 
         [`${cmdOrCtrl}+n`]: () => openNewCommandTab(),
-        [`${cmdOrCtrl}+t`]: () => openNewCommandTab(),
+        [`${cmdOrCtrl}+t`]: () => {
+            if (isFocusInTerminalPane()) {
+                createTerminalSession(); // D-01: new terminal session
+            } else {
+                openNewCommandTab(); // existing behavior: new command tab
+            }
+        },
 
         [`${cmdOrCtrl}+f`]: () => setPaletteOpen(true),
 
@@ -1257,24 +1274,55 @@ function App() {
         },
 
         'ctrl+w': () => {
-            if (activeTabId) closeTab(activeTabId);
+            if (isFocusInTerminalPane()) {
+                // D-02: close active terminal session, no-op if last tab
+                if (sessions.length > 1 && activeSessionId) {
+                    closeTerminalSession(activeSessionId);
+                }
+            } else {
+                if (activeTabId) closeTab(activeTabId);
+            }
         },
         'meta+w': () => {
-            if (activeTabId) closeTab(activeTabId);
+            if (isFocusInTerminalPane()) {
+                if (sessions.length > 1 && activeSessionId) {
+                    closeTerminalSession(activeSessionId);
+                }
+            } else {
+                if (activeTabId) closeTab(activeTabId);
+            }
         },
 
         'ctrl+tab': () => {
-            if (openTabs.length < 2) return;
-            const idx = openTabs.findIndex((t) => t.id === activeTabId);
-            const next = openTabs[(idx + 1) % openTabs.length];
-            if (next) handleSelectTab(next.id);
+            if (isFocusInTerminalPane()) {
+                // D-05: cycle terminal sessions forward, wrap around
+                if (sessions.length < 2) return;
+                const idx = sessions.findIndex(s => s.id === activeSessionId);
+                const next = sessions[(idx + 1) % sessions.length];
+                if (next) switchTerminalSession(next.id);
+            } else {
+                // existing behavior: cycle command tabs forward
+                if (openTabs.length < 2) return;
+                const idx = openTabs.findIndex((t) => t.id === activeTabId);
+                const next = openTabs[(idx + 1) % openTabs.length];
+                if (next) handleSelectTab(next.id);
+            }
         },
 
         'ctrl+shift+tab': () => {
-            if (openTabs.length < 2) return;
-            const idx = openTabs.findIndex((t) => t.id === activeTabId);
-            const prev = openTabs[(idx - 1 + openTabs.length) % openTabs.length];
-            if (prev) handleSelectTab(prev.id);
+            if (isFocusInTerminalPane()) {
+                // D-05: cycle terminal sessions backward, wrap around
+                if (sessions.length < 2) return;
+                const idx = sessions.findIndex(s => s.id === activeSessionId);
+                const prev = sessions[(idx - 1 + sessions.length) % sessions.length];
+                if (prev) switchTerminalSession(prev.id);
+            } else {
+                // existing behavior: cycle command tabs backward
+                if (openTabs.length < 2) return;
+                const idx = openTabs.findIndex((t) => t.id === activeTabId);
+                const prev = openTabs[(idx - 1 + openTabs.length) % openTabs.length];
+                if (prev) handleSelectTab(prev.id);
+            }
         },
 
         'ctrl+`': () => {
