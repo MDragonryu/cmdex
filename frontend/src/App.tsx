@@ -9,6 +9,7 @@ import VariablePrompt from './components/VariablePrompt';
 import TerminalComponent, { type TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
+import TerminalTabBar from './components/TerminalTabBar';
 import CommandPalette from './components/CommandPalette';
 import WelcomeTab from './components/WelcomeTab';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
@@ -1454,6 +1455,16 @@ function App() {
                             </div>
 
                             {!terminalCollapsed && (
+                                <>
+                                <TerminalTabBar
+                                    sessions={sessions}
+                                    activeSessionId={activeSessionId}
+                                    onSelectTab={switchTerminalSession}
+                                    onCloseTab={closeTerminalSession}
+                                    onReorderTabs={handleReorderTerminalTabs}
+                                    onCreateSession={createTerminalSession}
+                                    onRenameSession={renameTerminalSession}
+                                />
                                 <div
                                     className={`terminal-divider ${isDragging ? 'dragging' : ''}`}
                                     onMouseDown={handleTerminalResizeStart}
@@ -1469,7 +1480,10 @@ function App() {
                                     <button
                                         className="terminal-clear-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => terminalRef.current?.clear()}
+                                        onClick={() => {
+                                            const ref = terminalRefs.current[activeSessionId];
+                                            if (ref) ref.clear();
+                                        }}
                                         aria-label="Clear terminal"
                                         title="Clear terminal (Ctrl+L)"
                                     >
@@ -1479,7 +1493,8 @@ function App() {
                                         className="terminal-copy-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onClick={() => {
-                                            const output = terminalRef.current?.getLastOutput() || '';
+                                            const ref = terminalRefs.current[activeSessionId];
+                                            const output = ref?.getLastOutput() || '';
                                             if (output) {
                                                 navigator.clipboard.writeText(output).then(() => {
                                                     toast.success('Output copied');
@@ -1494,6 +1509,7 @@ function App() {
                                         {t('common.copyLastOutput')}
                                     </button>
                                 </div>
+                            </>
                             )}
 
                             <div
@@ -1503,13 +1519,31 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
-                                <TerminalComponent
-                                    ref={terminalRef}
-                                    isVisible={!terminalCollapsed}
-                                    theme={theme}
-                                    sessionId={activeSessionId}
-                                    onShellExit={collapseTerminal}
-                                />
+                                {sessions.map((session) => (
+                                    <TerminalComponent
+                                        key={session.id}
+                                        ref={(el) => {
+                                            if (el) {
+                                                terminalRefs.current[session.id] = el;
+                                            } else {
+                                                delete terminalRefs.current[session.id];
+                                            }
+                                        }}
+                                        isVisible={session.id === activeSessionId && !terminalCollapsed}
+                                        theme={theme}
+                                        sessionId={session.id}
+                                        onShellExit={() => {
+                                            // Mark session as stopped
+                                            setSessions(prev => prev.map(s =>
+                                                s.id === session.id ? { ...s, running: false } : s
+                                            ));
+                                            // If this was the active session and it exited, collapse terminal
+                                            if (session.id === activeSessionId) {
+                                                collapseTerminal();
+                                            }
+                                        }}
+                                    />
+                                ))}
                                 {terminalCollapsed && (
                                     <button
                                         className="terminal-collapsed-rail"
