@@ -23,7 +23,12 @@
 6. Namespaced events (`pty-output:{sessionId}`, `pty-exit:{sessionId}`, `pty-cleared:{sessionId}`) route output correctly per session
 7. SessionService uses a mutex-protected map — no global state collision
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 21-01-PLAN.md — Session types, struct refactoring, CRUD API (CreateSession, ListSessions, CloseSession, RenameSession, active session)
+- [ ] 21-02-PLAN.md — Per-session PTY lifecycle, namespaced events, ServiceStartup/Shutdown
+- [ ] 21-03-PLAN.md — Frontend event wiring, Wails bindings, multi-session Go tests
 
 **UI hint**: no
 
@@ -120,7 +125,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 21. Backend Session Foundation | 0/0 | Not started | - |
+| 21. Backend Session Foundation | 0/3 | Not started | - |
 | 22. Database Persistence | 0/0 | Not started | - |
 | 23. Frontend Tabbed Terminal | 0/0 | Not started | - |
 | 24. Session-Aware Execution | 0/0 | Not started | - |
