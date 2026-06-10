@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -20,8 +21,22 @@ type ptyWinsize struct {
 	Cols uint16
 }
 
-// TerminalService manages a PTY-backed shell process for the integrated terminal.
-type TerminalService struct {
+// SessionInfo is the public metadata for a terminal session, sent to the frontend.
+type SessionInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Running    bool   `json:"running"`
+	ShellPath  string `json:"shellPath"`
+	WorkingDir string `json:"workingDir"`
+}
+
+// sessionState is the internal per-session state: PTY, process, goroutine tracking.
+type sessionState struct {
+	id              string
+	name            string
+	workingDir      string
+	createdAt       time.Time
+
 	mu              sync.Mutex
 	ptmx            *os.File
 	cmd             *exec.Cmd
@@ -33,17 +48,60 @@ type TerminalService struct {
 	starting        bool
 	intentionalStop bool
 
-	// readerWg tracks the readLoop goroutine lifetime. startLocked calls
-	// readerWg.Wait() after closing the old PTY fd, guaranteeing the old
-	// goroutine has fully exited before a new one starts — preventing two
-	// concurrent readers on the same fd from producing interleaved output.
-	readerWg sync.WaitGroup
-
-	outputCh  chan string
-	outputSeq uint64
-	emitterWg sync.WaitGroup
-
+	readerWg     sync.WaitGroup
+	outputCh     chan string
+	outputSeq    uint64
+	emitterWg    sync.WaitGroup
 	droppedCount atomic.Uint64
+}
+
+// TerminalService manages a PTY-backed shell process for the integrated terminal.
+type TerminalService struct {
+	mu              sync.RWMutex
+	sessions        map[string]*sessionState
+	activeSessionID string
+	sessionCounter  int
+}
+
+// info returns the public SessionInfo for this session.
+func (ss *sessionState) info() *SessionInfo {
+	return &SessionInfo{
+		ID:         ss.id,
+		Name:       ss.name,
+		Running:    ss.running,
+		ShellPath:  ss.shellPath,
+		WorkingDir: ss.workingDir,
+	}
+}
+
+// getWorkingDir returns os.UserHomeDir() as the working directory for new sessions.
+func getWorkingDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
+}
+
+// resolveSession resolves a sessionId to a *sessionState pointer.
+// If sessionId is "", falls back to the active session.
+// The caller must NOT hold s.mu while operating on the returned sessionState.
+func (s *TerminalService) resolveSession(sessionId string) (*sessionState, error) {
+	if sessionId == "" {
+		s.mu.RLock()
+		sessionId = s.activeSessionID
+		s.mu.RUnlock()
+		if sessionId == "" {
+			return nil, fmt.Errorf("no active session")
+		}
+	}
+	s.mu.RLock()
+	ss, ok := s.sessions[sessionId]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("session not found: %s", sessionId)
+	}
+	return ss, nil
 }
 
 func detectShell() (path, flag string) {
