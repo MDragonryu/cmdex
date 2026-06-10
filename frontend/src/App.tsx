@@ -38,6 +38,7 @@ import {
     type VariablePrompt as VarPromptType,
     type VariablePreset,
     type TabDraft,
+    type SessionInfo,
     type SettingsPayload,
     type OSPathMap,
     type OSKey,
@@ -75,7 +76,7 @@ import {
     GetVariables,
     RunCommand,
 } from '../bindings/cmdex/executionservice';
-import { GetActiveSession } from '../bindings/cmdex/terminalservice';
+import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession } from '../bindings/cmdex/terminalservice';
 import i18n from './i18n';
 import {
     emptyDraft,
@@ -141,7 +142,7 @@ function App() {
     const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
-    const terminalRef = useRef<TerminalHandle>(null);
+    const terminalRefs = useRef<Record<string, TerminalHandle>>({});
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -173,6 +174,7 @@ function App() {
     });
 
     const [activeSessionId, setActiveSessionId] = useState<string>('');
+    const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
     const collapseTerminal = useCallback(() => {
         setTerminalCollapsed(true);
@@ -182,6 +184,64 @@ function App() {
     const expandTerminal = useCallback(() => {
         setTerminalCollapsed(false);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
+    }, []);
+
+    // -- Session CRUD callbacks (Task 1) --
+
+    const createTerminalSession = useCallback(async () => {
+        try {
+            const info = await CreateSession();
+            if (info) {
+                setSessions(prev => [...prev, info]);
+                setActiveSessionId(info.id);
+                SetActiveSession(info.id);
+            }
+        } catch (err) {
+            console.error('Failed to create terminal session:', err);
+            toast.error('Could not create session. Check that the terminal backend is running.');
+        }
+    }, []);
+
+    const closeTerminalSession = useCallback(async (id: string) => {
+        if (sessions.length <= 1) return; // D-02: last tab not closeable
+        try {
+            await CloseSession(id);
+            setSessions(prev => prev.filter(s => s.id !== id));
+            // If closing the active session, auto-select nearest remaining
+            if (activeSessionId === id) {
+                const remaining = sessions.filter(s => s.id !== id);
+                const next = remaining[0];
+                if (next) {
+                    setActiveSessionId(next.id);
+                    SetActiveSession(next.id);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to close terminal session:', err);
+        }
+    }, [sessions, activeSessionId]);
+
+    const renameTerminalSession = useCallback(async (id: string, name: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        try {
+            await RenameSession(id, trimmed);
+            setSessions(prev => prev.map(s =>
+                s.id === id ? { ...s, name: trimmed } : s
+            ));
+        } catch (err) {
+            console.error('Failed to rename session:', err);
+            toast.error('Could not rename session. Please try again.');
+        }
+    }, []);
+
+    const switchTerminalSession = useCallback((id: string) => {
+        setActiveSessionId(id);
+        SetActiveSession(id);
+    }, []);
+
+    const handleReorderTerminalTabs = useCallback((reordered: SessionInfo[]) => {
+        setSessions(reordered);
     }, []);
 
     const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
@@ -237,12 +297,48 @@ function App() {
 
     useEffect(() => {
         initEventNames().then(() => setEventsInitialized(true));
-        GetActiveSession().then((info) => {
+        // Load all sessions and active session on mount
+        ListSessions().then((list) => {
+            const loaded = ((list || []) as SessionInfo[]).filter(Boolean);
+            setSessions(loaded);
+            // Return loaded for the next .then(), and chain GetActiveSession
+            return GetActiveSession().then((info) => ({ loaded, info }));
+        }).then(({ loaded, info }) => {
             if (info) {
                 setActiveSessionId(info.id);
+            } else if (loaded.length === 0) {
+                // No active session and no sessions loaded — create a default session
+                CreateSession().then((newInfo) => {
+                    if (newInfo) {
+                        setSessions([newInfo]);
+                        setActiveSessionId(newInfo.id);
+                        SetActiveSession(newInfo.id);
+                    }
+                }).catch(() => {});
             }
         }).catch(() => {});
     }, []);
+
+    // Track per-session running status via pty-exit events
+    useEffect(() => {
+        if (!eventsInitialized) return;
+        const cleanups: (() => void)[] = [];
+
+        const subscribeSession = (sessionId: string) => {
+            const ptyExitEvent = 'pty-exit:' + sessionId;
+            const cleanup = Events.On(ptyExitEvent, () => {
+                setSessions(prev => prev.map(s =>
+                    s.id === sessionId ? { ...s, running: false } : s
+                ));
+            });
+            cleanups.push(cleanup);
+            return cleanup;
+        };
+
+        sessions.forEach(s => subscribeSession(s.id));
+
+        return () => cleanups.forEach(fn => fn());
+    }, [sessions.map(s => s.id).join(','), eventsInitialized]);
 
     useEffect(() => {
         applyTheme(theme);
