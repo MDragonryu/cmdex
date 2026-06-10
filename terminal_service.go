@@ -154,7 +154,6 @@ func (s *TerminalService) ServiceShutdown() error {
 // CreateSession creates a new terminal session with a UUID v4 ID and default name "Terminal N".
 func (s *TerminalService) CreateSession() (*SessionInfo, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.sessionCounter++
 	name := fmt.Sprintf("Terminal %d", s.sessionCounter)
@@ -172,15 +171,29 @@ func (s *TerminalService) CreateSession() (*SessionInfo, error) {
 	if s.activeSessionID == "" {
 		s.activeSessionID = id
 	}
+	s.mu.Unlock()
 
 	// Start emitter goroutine for output batching.
 	ss.startEmitter()
 
-	// Start the PTY shell. startSessionLocked acquires ss.mu internally;
-	// s.mu is already held — startSessionLocked uses only ss.mu.
+	// Start the PTY shell. startSessionLocked requires ss.mu to be held and
+	// returns with ss.mu held. s.mu must NOT be held (prevents deadlock with
+	// unlock-before-blocking pattern).
+	ss.mu.Lock()
 	if err := s.startSessionLocked(ss, 80, 24); err != nil {
+		ss.mu.Unlock()
+		s.mu.Lock()
+		delete(s.sessions, id)
+		if s.activeSessionID == id {
+			s.activeSessionID = ""
+		}
+		s.mu.Unlock()
 		return nil, err
 	}
+	ss.mu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return ss.info(), nil
 }
@@ -232,7 +245,7 @@ func (s *TerminalService) CloseSession(id string) error {
 	if oldPtmx != nil {
 		oldPtmx.Close()
 	}
-	if oldCmd != nil {
+	if oldCmd != nil && oldCmd.ProcessState == nil {
 		killProcessGroup(oldCmd)
 	}
 	ss.readerWg.Wait()
@@ -326,9 +339,10 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	if oldPtmx != nil {
 		oldPtmx.Close()
 	}
-	if oldCmd != nil {
+	if oldCmd != nil && oldCmd.ProcessState == nil {
 		killProcessGroup(oldCmd)
 	}
+	ss.readerWg.Wait()
 	ss.readerWg.Wait()
 
 	ptmx, cmd, err := ptyStart(shellPath, shellFlag, rows, cols)
@@ -651,7 +665,7 @@ func (s *TerminalService) Stop(sessionId string) error {
 	if oldPtmx != nil {
 		oldPtmx.Close()
 	}
-	if oldCmd != nil {
+	if oldCmd != nil && oldCmd.ProcessState == nil {
 		killProcessGroup(oldCmd)
 	}
 	ss.readerWg.Wait()

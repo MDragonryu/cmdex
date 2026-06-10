@@ -39,9 +39,14 @@ func killProcessGroup(cmd *exec.Cmd) error {
 
 	_ = syscall.Kill(-pid, syscall.SIGHUP)
 
-	done := make(chan error, 1)
+	if cmd.ProcessState != nil {
+		return nil
+	}
+
+	done := make(chan struct{}, 1)
 	go func() {
-		done <- cmd.Wait()
+		_ = cmd.Wait()
+		done <- struct{}{}
 	}()
 
 	select {

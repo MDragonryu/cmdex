@@ -174,6 +174,10 @@ func TestShellQuoteDir(t *testing.T) {
 }
 
 func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	prevTerminalSvc := terminalSvc
 	terminalSvc = nil
 	defer func() { terminalSvc = prevTerminalSvc }()
@@ -184,5 +188,17 @@ func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
 
 	if terminalSvc == nil {
 		t.Error("terminalSvc should be non-nil after ServiceStartup, got nil")
+	}
+
+	s.mu.RLock()
+	count := len(s.sessions)
+	s.mu.RUnlock()
+
+	if count != 1 {
+		t.Errorf("expected 1 default session after ServiceStartup, got %d", count)
+	}
+
+	if s.sessionCounter != 1 {
+		t.Errorf("expected sessionCounter=1 after ServiceStartup, got %d", s.sessionCounter)
 	}
 }
