@@ -412,13 +412,16 @@ func (ss *sessionState) readLoop(ptmx *os.File, stopCh chan struct{}) {
 		// Find last valid UTF-8 boundary to avoid splitting multi-byte sequences.
 		validEnd := len(data)
 		for validEnd > 0 {
-			if validEnd >= 2 && data[validEnd-2]&0xC0 == 0xC0 {
+			if data[validEnd-1]&0x80 == 0 {
 				break
 			}
-			if validEnd >= 3 && data[validEnd-3]&0xE0 == 0xE0 {
+			if validEnd >= 2 && data[validEnd-2]&0xE0 == 0xC0 {
 				break
 			}
-			if validEnd >= 4 && data[validEnd-4]&0xF0 == 0xF0 {
+			if validEnd >= 3 && data[validEnd-3]&0xF0 == 0xE0 {
+				break
+			}
+			if validEnd >= 4 && data[validEnd-4]&0xF8 == 0xF0 {
 				break
 			}
 			validEnd--

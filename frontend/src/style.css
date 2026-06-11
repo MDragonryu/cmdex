@@ -548,8 +548,6 @@ body {
 /* ========== Tab Bar ========== */
 
 .tab-bar {
-  --wails-draggable: drag;
-
   display: flex;
   height: var(--tab-bar-height);
   background: var(--tab-bar-bg);
@@ -599,6 +597,24 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+
+.tab-rename-input {
+  flex: 1;
+  height: 24px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--foreground);
+  background: var(--input-background);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  outline: none;
+  min-width: 0;
+}
+
+.tab-rename-input:focus {
+  border-color: var(--tab-active-indicator);
 }
 
 .tab-close {
@@ -654,6 +670,7 @@ body {
 }
 
 .tab-drag-handle {
+  --wails-draggable: no-drag;
   display: flex;
   align-items: center;
   cursor: grab;

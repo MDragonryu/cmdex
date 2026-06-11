@@ -592,7 +592,7 @@ function SortableTerminalTab({
 | A3 | `SessionInfo` type from Go backend (with `id`, `name`, `running`, `shellPath`, `workingDir`) is already generated in `frontend/bindings/cmdex/models.js` and usable as-is | Standard Stack | LOW — Confirmed by reading models.js lines 497-553, which show the SessionInfo class with all expected fields. |
 | A4 | `@dnd-kit/sortable` v10 uses v1 API (`DndContext`, `SortableContext`, `useSortable`, `arrayMove`) not v2 API (`DragDropProvider`) | Architecture Patterns | LOW — Confirmed by reading node_modules version (10.0.0) and package.json. The v2 API is a separate package (`@dnd-kit/react`). |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Keyboard shortcut resolution for Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab**
    - What we know: These shortcuts are already bound for command tabs in App.tsx (lines 1154, 1162-1164, 1169, 1176). CONTEXT.md specifies them for terminal tabs.

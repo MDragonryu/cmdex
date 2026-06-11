@@ -1299,7 +1299,12 @@ function App() {
                 if (sessions.length < 2) return;
                 const idx = sessions.findIndex(s => s.id === activeSessionId);
                 const next = sessions[(idx + 1) % sessions.length];
-                if (next) switchTerminalSession(next.id);
+                if (next) {
+                    switchTerminalSession(next.id);
+                    requestAnimationFrame(() => {
+                        terminalRefs.current[next.id]?.focus();
+                    });
+                }
             } else {
                 // existing behavior: cycle command tabs forward
                 if (openTabs.length < 2) return;
@@ -1315,7 +1320,12 @@ function App() {
                 if (sessions.length < 2) return;
                 const idx = sessions.findIndex(s => s.id === activeSessionId);
                 const prev = sessions[(idx - 1 + sessions.length) % sessions.length];
-                if (prev) switchTerminalSession(prev.id);
+                if (prev) {
+                    switchTerminalSession(prev.id);
+                    requestAnimationFrame(() => {
+                        terminalRefs.current[prev.id]?.focus();
+                    });
+                }
             } else {
                 // existing behavior: cycle command tabs backward
                 if (openTabs.length < 2) return;
@@ -1580,6 +1590,7 @@ function App() {
                                         isVisible={session.id === activeSessionId && !terminalCollapsed}
                                         theme={theme}
                                         sessionId={session.id}
+                                        activeSessionId={activeSessionId}
                                         onShellExit={() => {
                                             // Mark session as stopped
                                             setSessions(prev => prev.map(s =>

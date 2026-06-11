@@ -13,6 +13,7 @@ interface TerminalComponentProps {
   isVisible: boolean;
   theme: string;
   sessionId: string;
+  activeSessionId: string;
   onShellExit?: () => void;
 }
 
@@ -20,15 +21,25 @@ export interface TerminalHandle {
     clear: () => void;
     getSelection: () => string;
     getLastOutput: () => string;
+    focus: () => void;
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ isVisible, theme, sessionId, onShellExit }, ref) => {
+    ({ isVisible, theme, sessionId, activeSessionId, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const isFirstMountRef = useRef(true);
   const backendAvailableRef = useRef(true);
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const activeSessionIdRef = useRef(activeSessionId);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -47,7 +58,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           terminalRef.current?.clear();
           return;
         }
-        Clear(sessionId).catch((err) => {
+        Clear(sessionIdRef.current).catch((err) => {
           console.error('clear failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -151,6 +162,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
           return outputLines.join('\n');
       },
+      focus: () => {
+        terminalRef.current?.focus();
+      },
   }));
 
   useEffect(() => {
@@ -214,22 +228,14 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       webglAddon.onContextLoss(() => webglAddon.dispose());
       term.loadAddon(webglAddon);
     } catch {
-      // WebGL unavailable — canvas renderer used by default
     }
 
     if (containerRef.current) {
       term.open(containerRef.current);
       requestAnimationFrame(() => {
         fitAddon.fit();
-        Start(sessionId, term.cols, term.rows).catch((err) => {
-          console.error('terminal start failed:', err);
-          if (backendAvailableRef.current) {
-            backendAvailableRef.current = false;
-            toast.error('Terminal start failed');
-          }
-        });
-        if (!skipTransition) {
-            containerRef.current!.style.opacity = '1';
+        if (!skipTransition && containerRef.current) {
+            containerRef.current.style.opacity = '1';
         }
       });
     }
@@ -238,7 +244,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const inputDisposable = term.onData((data) => {
       if (!backendAvailableRef.current) return;
-      Write(sessionId, data).catch((err) => {
+      Write(sessionIdRef.current, data).catch((err) => {
         console.error('TerminalService.Write failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -248,7 +254,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (!backendAvailableRef.current) return;
-      Resize(sessionId, cols, rows).catch((err) => {
+      Resize(sessionIdRef.current, cols, rows).catch((err) => {
         console.error('resize failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -262,6 +268,34 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     if (containerRef.current) {
       observer.observe(containerRef.current);
     }
+
+    return () => {
+      inputDisposable.dispose();
+      resizeDisposable.dispose();
+      observer.disconnect();
+      if (terminalRef.current === term) {
+        term.dispose();
+        terminalRef.current = null;
+        fitAddonRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term || !sessionId) return;
+
+    requestAnimationFrame(() => {
+      const current = terminalRef.current;
+      if (!current) return;
+      Start(sessionId, current.cols, current.rows).catch((err) => {
+        console.error('terminal start failed:', err);
+        if (backendAvailableRef.current) {
+          backendAvailableRef.current = false;
+          toast.error('Terminal start failed');
+        }
+      });
+    });
 
     const ptyOutputEvent = 'pty-output:' + sessionId;
     const ptyExitEvent = 'pty-exit:' + sessionId;
@@ -293,9 +327,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     });
 
     const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
+      if (activeSessionIdRef.current !== sessionIdRef.current) return;
       const cmdLine = event?.data?.data;
       if (cmdLine && backendAvailableRef.current) {
-        Write(sessionId, cmdLine).catch((err) => {
+        Write(sessionIdRef.current, cmdLine).catch((err) => {
           console.error('TerminalService.Write failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -305,18 +340,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     });
 
     return () => {
-      inputDisposable.dispose();
-      resizeDisposable.dispose();
-      observer.disconnect();
       cleanupOutput();
       cleanupExit();
       cleanupCleared();
       cleanupCmdExecuting();
-      if (terminalRef.current === term) {
-        term.dispose();
-        terminalRef.current = null;
-        fitAddonRef.current = null;
-      }
     };
   }, [sessionId]);
 

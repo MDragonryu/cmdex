@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { GripVertical, Plus, X } from 'lucide-react';
 import {
   DndContext,
@@ -63,11 +63,30 @@ function SortableTerminalTab({
     transition,
   };
 
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(session.name);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   const handleRename = () => {
-    const newName = window.prompt('Rename session:', session.name);
-    if (newName !== null && newName.trim() !== '') {
-      onRename(session.id, newName.trim());
+    setRenameValue(session.name);
+    setIsRenaming(true);
+    // Focus the input after React commits the render
+    requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+  };
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== session.name) {
+      onRename(session.id, trimmed);
     }
+    setIsRenaming(false);
+  };
+
+  const cancelRename = () => {
+    setIsRenaming(false);
   };
 
   return (
@@ -85,9 +104,29 @@ function SortableTerminalTab({
           <span
             className={`tab-status-dot ${session.running ? 'running' : 'stopped'}`}
           />
-          <span className="tab-title" title={session.name}>
-            {session.name}
-          </span>
+          {isRenaming ? (
+            <input
+              ref={renameInputRef}
+              className="tab-rename-input"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelRename();
+                }
+              }}
+              onBlur={commitRename}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="tab-title" title={session.name}>
+              {session.name}
+            </span>
+          )}
           {!isLastTab && (
             <span
               className="tab-close"
