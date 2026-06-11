@@ -31,6 +31,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const fitAddonRef = useRef<FitAddon | null>(null);
   const isFirstMountRef = useRef(true);
   const backendAvailableRef = useRef(true);
+  const startCalledRef = useRef(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -278,6 +279,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
         terminalRef.current = null;
         fitAddonRef.current = null;
       }
+      startCalledRef.current = false;
     };
   }, []);
 
@@ -285,17 +287,20 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     const term = terminalRef.current;
     if (!term || !sessionId) return;
 
-    requestAnimationFrame(() => {
-      const current = terminalRef.current;
-      if (!current) return;
-      Start(sessionId, current.cols, current.rows).catch((err) => {
-        console.error('terminal start failed:', err);
-        if (backendAvailableRef.current) {
-          backendAvailableRef.current = false;
-          toast.error('Terminal start failed');
-        }
+    if (!startCalledRef.current) {
+      startCalledRef.current = true;
+      requestAnimationFrame(() => {
+        const current = terminalRef.current;
+        if (!current) return;
+        Start(sessionId, current.cols, current.rows).catch((err) => {
+          console.error('terminal start failed:', err);
+          if (backendAvailableRef.current) {
+            backendAvailableRef.current = false;
+            toast.error('Terminal start failed');
+          }
+        });
       });
-    });
+    }
 
     const ptyOutputEvent = 'pty-output:' + sessionId;
     const ptyExitEvent = 'pty-exit:' + sessionId;
