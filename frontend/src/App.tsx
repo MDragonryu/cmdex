@@ -176,6 +176,7 @@ function App() {
 
     const [activeSessionId, setActiveSessionId] = useState<string>('');
     const [sessions, setSessions] = useState<SessionInfo[]>([]);
+    const terminalOrderRef = useRef<string[]>([]);
 
     const collapseTerminal = useCallback(() => {
         setTerminalCollapsed(true);
@@ -196,6 +197,7 @@ function App() {
                 setSessions(prev => [...prev, info]);
                 setActiveSessionId(info.id);
                 SetActiveSession(info.id);
+                terminalOrderRef.current = [...terminalOrderRef.current, info.id];
             }
         } catch (err) {
             console.error('Failed to create terminal session:', err);
@@ -208,6 +210,7 @@ function App() {
         try {
             await CloseSession(id);
             setSessions(prev => prev.filter(s => s.id !== id));
+            terminalOrderRef.current = terminalOrderRef.current.filter(tid => tid !== id);
             // If closing the active session, auto-select nearest remaining
             if (activeSessionId === id) {
                 const remaining = sessions.filter(s => s.id !== id);
@@ -313,6 +316,7 @@ function App() {
         ListSessions().then((list) => {
             const loaded = ((list || []) as SessionInfo[]).filter(Boolean);
             setSessions(loaded);
+            terminalOrderRef.current = loaded.map(s => s.id);
             // Return loaded for the next .then(), and chain GetActiveSession
             return GetActiveSession().then((info) => ({ loaded, info }));
         }).then(({ loaded, info }) => {
@@ -325,6 +329,7 @@ function App() {
                         setSessions([newInfo]);
                         setActiveSessionId(newInfo.id);
                         SetActiveSession(newInfo.id);
+                        terminalOrderRef.current = [newInfo.id];
                     }
                 }).catch(() => {});
             }
@@ -1577,32 +1582,36 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
-                                {sessions.map((session) => (
-                                    <TerminalComponent
-                                        key={session.id}
-                                        ref={(el) => {
-                                            if (el) {
-                                                terminalRefs.current[session.id] = el;
-                                            } else {
-                                                delete terminalRefs.current[session.id];
-                                            }
-                                        }}
-                                        isVisible={session.id === activeSessionId && !terminalCollapsed}
-                                        theme={theme}
-                                        sessionId={session.id}
-                                        activeSessionId={activeSessionId}
-                                        onShellExit={() => {
-                                            // Mark session as stopped
-                                            setSessions(prev => prev.map(s =>
-                                                s.id === session.id ? { ...s, running: false } : s
-                                            ));
-                                            // If this was the active session and it exited, collapse terminal
-                                            if (session.id === activeSessionId) {
-                                                collapseTerminal();
-                                            }
-                                        }}
-                                    />
-                                ))}
+                                {terminalOrderRef.current.map((id) => {
+                                    const session = sessions.find(s => s.id === id);
+                                    if (!session) return null;
+                                    return (
+                                        <TerminalComponent
+                                            key={id}
+                                            ref={(el) => {
+                                                if (el) {
+                                                    terminalRefs.current[id] = el;
+                                                } else {
+                                                    delete terminalRefs.current[id];
+                                                }
+                                            }}
+                                            isVisible={id === activeSessionId && !terminalCollapsed}
+                                            theme={theme}
+                                            sessionId={id}
+                                            activeSessionId={activeSessionId}
+                                            onShellExit={() => {
+                                                // Mark session as stopped
+                                                setSessions(prev => prev.map(s =>
+                                                    s.id === id ? { ...s, running: false } : s
+                                                ));
+                                                // If this was the active session and it exited, collapse terminal
+                                                if (id === activeSessionId) {
+                                                    collapseTerminal();
+                                                }
+                                            }}
+                                        />
+                                    );
+                                })}
                                 {terminalCollapsed && (
                                     <button
                                         className="terminal-collapsed-rail"
