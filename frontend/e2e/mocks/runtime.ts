@@ -347,7 +347,6 @@ const handlers: Record<number, (...args: any[]) => any> = {
   // ── Events ───────────────────────────────────────────────
   // GetEventNames
   2407475739: () => ({
-    cmdOutput: 'cmd-output',
     openSettings: 'open-settings',
     openShortcuts: 'open-shortcuts',
     settingsChanged: 'settings-changed',
