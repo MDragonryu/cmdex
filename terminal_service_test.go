@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -676,4 +677,155 @@ func TestTerminalService_NamespacedEvents(t *testing.T) {
 	if ss.id != info.ID {
 		t.Errorf("session id mismatch: %s != %s", ss.id, info.ID)
 	}
+}
+
+// cwdInheritanceTestDB opens a test DB, swaps the package-level `db` var to
+// point at it, and registers a cleanup that restores the previous value and
+// closes the test DB. Mirrors the save/restore pattern from
+// execution_service_test.go:testDBCreateCommand. If NewDB fails (no home dir,
+// no permissions, etc.) the test is skipped — same guard as TestRunCommand_*.
+func cwdInheritanceTestDB(t *testing.T) func() {
+	t.Helper()
+	testDB, err := NewDB()
+	if err != nil {
+		t.Skipf("cannot open test DB: %v", err)
+	}
+	prevDB := db
+	db = testDB
+	return func() {
+		db = prevDB
+		testDB.Close()
+	}
+}
+
+// setGlobalDefaultCwd writes settings.DefaultWorkingDir for the current OS to
+// the given path. The OSPathMap is replaced (not merged) so the test can
+// cleanly switch between the configured and home-fallback paths.
+func setGlobalDefaultCwd(t *testing.T, path string) {
+	t.Helper()
+	settings, err := db.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings failed: %v", err)
+	}
+	if path == "" {
+		settings.DefaultWorkingDir = &OSPathMap{paths: map[string]string{}}
+	} else {
+		settings.DefaultWorkingDir = &OSPathMap{paths: map[string]string{runtime.GOOS: path}}
+	}
+	if err := db.SetSettings(settings); err != nil {
+		t.Fatalf("SetSettings failed: %v", err)
+	}
+}
+
+// TestTerminalService_GlobalDefaultCwdInheritance verifies D-04/D-05: a new
+// session's WorkingDir reads the OS-keyed global default from settings, and
+// falls back to the OS user home directory when the global default is empty
+// for the current OS. Uses the real DB so the settings read path is exercised
+// end-to-end.
+func TestTerminalService_GlobalDefaultCwdInheritance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	defer cwdInheritanceTestDB(t)()
+
+	// Unique token so this test does not collide with concurrent test runs
+	// that share the user's ~/.cmdex/cmdex.db.
+	token := fmt.Sprintf("wd-test-%d", time.Now().UnixNano())
+	wdPath := "/tmp/cmdex-test-wd-" + token
+
+	setGlobalDefaultCwd(t, wdPath)
+
+	s := newTestTerminalService(t)
+	defer s.ServiceShutdown()
+
+	info, err := s.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if info.WorkingDir != wdPath {
+		t.Errorf("expected WorkingDir=%q (from global default), got %q", wdPath, info.WorkingDir)
+	}
+
+	// Clear the global default — fall back to user home.
+	setGlobalDefaultCwd(t, "")
+
+	s2 := newTestTerminalService(t)
+	defer s2.ServiceShutdown()
+
+	info2, err := s2.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession (home fallback) failed: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir failed: %v", err)
+	}
+	if info2.WorkingDir != home {
+		t.Errorf("expected WorkingDir=%q (home fallback), got %q", home, info2.WorkingDir)
+	}
+
+	// Cleanup: clear the global default so subsequent tests start from a
+	// known-empty state.
+	setGlobalDefaultCwd(t, "")
+}
+
+// TestTerminalService_CwdInheritance_ExistingSessionUnaffected verifies D-06:
+// once a session is created, changing the global default cwd does not
+// retroactively alter the existing session's WorkingDir — CreateSession
+// snapshots the value at creation time, so existing sessions keep the cwd
+// they were started with.
+func TestTerminalService_CwdInheritance_ExistingSessionUnaffected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	defer cwdInheritanceTestDB(t)()
+
+	token := fmt.Sprintf("p-test-%d", time.Now().UnixNano())
+	p1 := "/tmp/cmdex-test-p1-" + token
+	p2 := "/tmp/cmdex-test-p2-" + token
+
+	setGlobalDefaultCwd(t, p1)
+
+	s := newTestTerminalService(t)
+	defer s.ServiceShutdown()
+
+	info1, err := s.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession (p1) failed: %v", err)
+	}
+	if info1.WorkingDir != p1 {
+		t.Fatalf("expected WorkingDir=%q for session 1, got %q", p1, info1.WorkingDir)
+	}
+
+	// Update the global default AFTER the first session is created.
+	setGlobalDefaultCwd(t, p2)
+
+	info2, err := s.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession (p2) failed: %v", err)
+	}
+	if info2.WorkingDir != p2 {
+		t.Errorf("expected WorkingDir=%q for session 2 (new global default), got %q", p2, info2.WorkingDir)
+	}
+
+	// Existing session 1 must still report its original cwd.
+	list := s.ListSessions()
+	var s1 *SessionInfo
+	for _, item := range list {
+		if item.ID == info1.ID {
+			s1 = item
+			break
+		}
+	}
+	if s1 == nil {
+		t.Fatalf("session 1 not found in ListSessions after creating session 2")
+	}
+	if s1.WorkingDir != p1 {
+		t.Errorf("D-06 violation: existing session 1 WorkingDir=%q, expected %q (must not retroactively change)",
+			s1.WorkingDir, p1)
+	}
+
+	// Cleanup: clear the global default so subsequent tests start from a
+	// known-empty state.
+	setGlobalDefaultCwd(t, "")
 }

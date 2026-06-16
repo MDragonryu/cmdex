@@ -74,8 +74,25 @@ func (ss *sessionState) info() *SessionInfo {
 	}
 }
 
-// getWorkingDir returns os.UserHomeDir() as the working directory for new sessions.
+// getWorkingDir returns the working directory for new sessions. It first
+// consults the OS-keyed global default cwd from settings (D-04, D-05); if
+// that is empty or settings is unavailable, it falls back to the OS user
+// home directory. Existing sessions are not retroactively affected by global
+// default changes — D-06 is enforced by CreateSession snapshotting the
+// returned value at session creation time.
 func getWorkingDir() string {
+	// Step 1: read the OS-keyed global default cwd from settings.
+	if db != nil {
+		settings, err := db.GetSettings()
+		if err != nil {
+			fmt.Printf("getWorkingDir: GetSettings failed: %v\n", err)
+		} else if settings.DefaultWorkingDir != nil {
+			if path := settings.DefaultWorkingDir.GetCurrentOS(); path != "" {
+				return path
+			}
+		}
+	}
+	// Step 2: fall back to the OS user home directory.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
