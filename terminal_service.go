@@ -20,6 +20,13 @@ type ptyWinsize struct {
 	Cols uint16
 }
 
+// MaxSessions is the maximum number of concurrent terminal sessions. Beyond
+// this limit, CreateSession returns an error to protect against unbounded
+// resource use. The number 10 is chosen as a reasonable cap that exceeds
+// normal user workflows (typical use is 1-3 sessions) while preventing
+// accidental resource exhaustion.
+const MaxSessions = 10
+
 // SessionInfo is the public metadata for a terminal session, sent to the frontend.
 type SessionInfo struct {
 	ID         string `json:"id"`
@@ -173,6 +180,10 @@ func (s *TerminalService) ServiceShutdown() error {
 // CreateSession creates a new terminal session with a UUID v4 ID and default name "Terminal N".
 func (s *TerminalService) CreateSession() (*SessionInfo, error) {
 	s.mu.Lock()
+	if n := len(s.sessions); n >= MaxSessions {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
+	}
 
 	s.sessionCounter++
 	name := fmt.Sprintf("Terminal %d", s.sessionCounter)

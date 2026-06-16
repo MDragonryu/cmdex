@@ -201,7 +201,12 @@ function App() {
             }
         } catch (err) {
             console.error('Failed to create terminal session:', err);
-            toast.error('Could not create session. Check that the terminal backend is running.');
+            const msg = String(err);
+            if (msg.includes('max sessions reached')) {
+                toast.error(t('toast.maxSessionsReached', { limit: 10 }));
+            } else {
+                toast.error('Could not create session. Check that the terminal backend is running.');
+            }
         }
     }, []);
 

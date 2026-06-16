@@ -190,7 +190,8 @@
     "presetSaved": "Preset saved",
     "commandSuccess": "Command completed successfully",
     "commandFailed": "Command failed (exit {{code}})",
-    "saveBeforeExecute": "Save your changes before running the command."
+    "saveBeforeExecute": "Save your changes before running the command.",
+    "maxSessionsReached": "Maximum number of terminal sessions ({{limit}}) reached. Close a session to create a new one."
   },
   "settings": {
     "title": "Settings",
