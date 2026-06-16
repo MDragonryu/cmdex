@@ -5,7 +5,6 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
-import { eventNames } from '../wails/events';
 import { Write, Resize, Start, Clear } from '../../bindings/cmdex/terminalservice';
 import { toast } from 'sonner';
 
@@ -13,7 +12,6 @@ interface TerminalComponentProps {
   isVisible: boolean;
   theme: string;
   sessionId: string;
-  activeSessionId: string;
   onShellExit?: () => void;
 }
 
@@ -25,7 +23,7 @@ export interface TerminalHandle {
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ isVisible, theme, sessionId, activeSessionId, onShellExit }, ref) => {
+    ({ isVisible, theme, sessionId, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -36,11 +34,6 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
-
-  const activeSessionIdRef = useRef(activeSessionId);
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -331,24 +324,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       terminalRef.current?.clear();
     });
 
-    const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
-      if (activeSessionIdRef.current !== sessionIdRef.current) return;
-      const cmdLine = event?.data?.data;
-      if (cmdLine && backendAvailableRef.current) {
-        Write(sessionIdRef.current, cmdLine).catch((err) => {
-          console.error('TerminalService.Write failed:', err);
-          if (backendAvailableRef.current) {
-            backendAvailableRef.current = false;
-          }
-        });
-      }
-    });
-
     return () => {
       cleanupOutput();
       cleanupExit();
       cleanupCleared();
-      cleanupCmdExecuting();
     };
   }, [sessionId]);
 

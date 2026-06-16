@@ -1598,7 +1598,6 @@ function App() {
                                             isVisible={id === activeSessionId && !terminalCollapsed}
                                             theme={theme}
                                             sessionId={id}
-                                            activeSessionId={activeSessionId}
                                             onShellExit={() => {
                                                 // Mark session as stopped
                                                 setSessions(prev => prev.map(s =>
