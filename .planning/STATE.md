@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-16T06:50:41.071Z"
+last_updated: "2026-06-16T07:06:11.910Z"
 last_activity: 2026-06-16 -- Phase null execution started
 progress:
   total_phases: 5
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 ## Current Position
 
 Phase: null (polish-integration) — EXECUTING
-Plan: 1 of 4
+Plan: 2 of 4
 Status: Executing Phase null
 Last activity: 2026-06-16 -- Phase null execution started
 
@@ -60,6 +60,7 @@ Last activity: 2026-06-16 -- Phase null execution started
 | Phase 15-cross-platform-execution P02 | 161 | 3 tasks | 1 files |
 | Phase 15-cross-platform-execution P03 | 185 | 3 tasks | 2 files |
 | Phase 18-execution-integration-and-interactivity P02 | 6min | 2 tasks | 3 files |
+| Phase 25 P01 | 9min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,7 @@ Last activity: 2026-06-16 -- Phase null execution started
 - ParseScriptBody now returns empty string for shebang-only inputs (no body present)
 - [Phase 18-execution-integration-and-interactivity]: forwardRef + useImperativeHandle pattern for exposing terminal.clear() to parent — Keeps clear logic encapsulated in terminal component; parent calls via terminalRef
 - [Phase 18-execution-integration-and-interactivity]: 50ms idle timeout for keystroke buffering — Mirrors the 16ms batching principle used in PTY readLoop
+- [Phase ?]: Build-tagged ptyBackend interface separates TerminalService from OS PTY layer; creack/pty on !windows, conpty stub on windows, darwin-only mockPtyBackend for orchestration tests — D-11/D-12 from Phase 25 CONTEXT. Refactor for testability — enables real orchestration tests against the mock on darwin and cross-compile verification on Windows.
 
 ### Blockers/Concerns
 

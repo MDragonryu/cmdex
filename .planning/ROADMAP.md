@@ -132,7 +132,7 @@ Plans:
 4. No memory leaks: rapid create/close cycles don't leak xterm instances or PTY processes
 5. Windows conpty compatibility verified (PTY spawn, resize, I/O, shell detection)
 
-**Plans:** TBD
+**Plans:** 1/4 plans executed
 
 **UI hint**: no
 
@@ -146,7 +146,7 @@ Plans:
 | 22. Database Persistence | 0/0 | Not started | - |
 | 23. Frontend Tabbed Terminal | 3/3 | Complete   | 2026-06-10 |
 | 24. Session-Aware Execution | 2/2 | Complete   | 2026-06-16 |
-| 25. Polish & Integration | 0/0 | Not started | - |
+| 25. Polish & Integration | 1/4 | In Progress|  |
 
 **Execution order:** 21 → 22 → 23 → 24 → 25 (serial — each phase depends on the prior)
 
