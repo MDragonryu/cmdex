@@ -102,12 +102,15 @@ Plans:
 4. Command output streams to the active session's terminal in real-time with ANSI support
 5. User can press Ctrl+C to interrupt a running command in the active session
 
-**Plans:** 2 plans
-
+**Plans:** 2/2 plans complete
 Plans:
+**Wave 1**
 
-- [ ] 24-01-PLAN.md — Go side: refactor RunCommand to direct terminalSvc.Write, delete RunInTerminal/GetExecutionHistory/ClearExecutionHistory, drop CmdExecuting from EventNames, add testWithTerminalSvc helper + 3 new tests
-- [ ] 24-02-PLAN.md — Frontend cleanup: remove cmd-executing subscription + activeSessionId prop from Terminal.tsx, delete OutputPane.tsx, clean i18n/CSS/e2e selectors/mocks, regenerate Wails bindings
+- [x] 24-01-PLAN.md — Go side: refactor RunCommand to direct terminalSvc.Write, delete RunInTerminal/GetExecutionHistory/ClearExecutionHistory, drop CmdExecuting from EventNames, add testWithTerminalSvc helper + 3 new tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 24-02-PLAN.md — Frontend cleanup: remove cmd-executing subscription + activeSessionId prop from Terminal.tsx, delete OutputPane.tsx, clean i18n/CSS/e2e selectors/mocks, regenerate Wails bindings
 
 **UI hint**: no
 
@@ -142,7 +145,7 @@ Plans:
 | 21. Backend Session Foundation | 0/3 | Not started | - |
 | 22. Database Persistence | 0/0 | Not started | - |
 | 23. Frontend Tabbed Terminal | 3/3 | Complete   | 2026-06-10 |
-| 24. Session-Aware Execution | 0/2 | Not started | - |
+| 24. Session-Aware Execution | 2/2 | Complete   | 2026-06-16 |
 | 25. Polish & Integration | 0/0 | Not started | - |
 
 **Execution order:** 21 → 22 → 23 → 24 → 25 (serial — each phase depends on the prior)
