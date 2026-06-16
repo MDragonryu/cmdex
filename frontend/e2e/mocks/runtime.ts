@@ -6,7 +6,6 @@
 let categories: any[] = [];
 let commands: any[] = [];
 const presets: Record<string, any[]> = {};
-let executionHistory: any[] = [];
 const settings: Record<string, any> = {
   locale: 'en',
   terminal: '',
@@ -332,20 +331,7 @@ const handlers: Record<number, (...args: any[]) => any> = {
       workingDir: '',
       executedAt: now(),
     };
-    executionHistory.push(record);
     return record;
-  },
-
-  // RunInTerminal(commandID, variables)
-  1736747747: () => {},
-
-  // ── History ──────────────────────────────────────────────
-  // GetExecutionHistory
-  2752844091: () => executionHistory,
-
-  // ClearExecutionHistory
-  3022740230: () => {
-    executionHistory = [];
   },
 
   // ── Import / Export ──────────────────────────────────────
@@ -384,7 +370,6 @@ const handlers: Record<number, (...args: any[]) => any> = {
     categories = [];
     commands = [];
     Object.keys(presets).forEach((k) => delete presets[k]);
-    executionHistory = [];
   },
 };
 
@@ -412,7 +397,6 @@ export class CancellablePromise<T> extends Promise<T> {
     categories = [];
     commands = [];
     Object.keys(presets).forEach((k) => delete presets[k]);
-    executionHistory = [];
     nextId = 0;
   },
   seed(data: { categories?: any[]; commands?: any[]; presets?: Record<string, any[]> }) {

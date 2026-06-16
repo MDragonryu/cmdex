@@ -5,7 +5,6 @@ export const eventNames = {
     openShortcuts: 'open-shortcuts',
     settingsChanged: 'settings-changed',
     settingsWindowClosing: 'settings-window-closing',
-    cmdExecuting: 'cmd-executing',
 };
 
 export async function initEventNames(): Promise<void> {
@@ -16,7 +15,6 @@ export async function initEventNames(): Promise<void> {
         eventNames.openShortcuts = names.openShortcuts;
         eventNames.settingsChanged = names.settingsChanged;
         eventNames.settingsWindowClosing = names.settingsWindowClosing;
-        eventNames.cmdExecuting = names.cmdExecuting;
     } catch (err) {
         console.error('Failed to init event names:', err);
         toast.error('Failed to initialize events. Using fallback event names.');
