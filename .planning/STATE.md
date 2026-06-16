@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: terminal-sessions
-status: shipped
+status: "Milestone v2.1 shipped — PR #42"
 last_updated: "2026-06-16T15:30:00.000Z"
 last_activity: 2026-06-16
 progress:
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Milestone: v2.1 — SHIPPED 2026-06-16
-Status: Archived to `.planning/milestones/v2.1-ROADMAP.md` and `v2.1-REQUIREMENTS.md`
+Status: Milestone v2.1 shipped — PR #42
 Last activity: 2026-06-16
 
 ## Performance Metrics
