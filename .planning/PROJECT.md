@@ -8,11 +8,24 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 
 Users can organize commands by project context, execute them with variable placeholders, and share them with the community — all in a clean, customizable interface.
 
-## Current State (v1.4 Shipped)
+## Current State (v2.1 Shipped)
 
-**Milestone:** v1.4 Editor Multi-Mount Refactor — SHIPPED 2026-04-23
-**Tech Stack:** Go + Wails v2 + React + TypeScript + Vite + SQLite
-**Status:** All phases complete. Per-tab DOM state preservation fully functional.
+**Milestone:** v2.1 Terminal Sessions — SHIPPED 2026-06-16
+**Tech Stack:** Go + Wails v3 + React 19 + TypeScript + Vite + SQLite (`modernc.org/sqlite`)
+**Status:** All phases complete. Multiple terminal sessions with refactored PTY backend, in-memory only (session persistence across restarts is deferred to a future milestone — see v2 deferred requirements).
+
+### v2.1 Features Delivered
+- ✅ Multiple terminal sessions with active-session routing (Phases 21-24)
+- ✅ Command execution routes directly to `terminalSvc.Write` on the active session (Phase 24)
+- ✅ ptyBackend interface with build-tagged darwin (`creack/pty`) and windows (conpty stub) implementations (Phase 25)
+- ✅ Darwin-only `mockPtyBackend` for hermetic orchestration tests (Phase 25)
+- ✅ Global default working directory inheritance for new sessions with home fallback (Phase 25)
+- ✅ 100-cycle CreateSession/CloseSession stress test passing with goroutine drift ≤ 5 (Phase 25)
+- ✅ `MaxSessions = 10` resource-exhaustion guard with localized toast (Phase 25)
+- ✅ Dead-code sweep — no remnants of `OutputPane`, `cmd-output`, or `RunInTerminal` in source (Phase 25)
+- ✅ `GOOS=windows go build ./...` cross-compile verification (Phase 25)
+- ✅ Documented Windows conpty runtime gap in CHECKPOINT.md and AGENTS.md (Phase 25)
+- ✅ ROADMAP/REQUIREMENTS doc sync — persistence claims removed, PERS-01..04 moved to v2 deferred (Phase 25)
 
 ### v1.4 Features Delivered
 - ✅ React.memo-wrapped CommandDetail (skip reconciliation on inactive tabs)
@@ -45,15 +58,14 @@ Users can organize commands by project context, execute them with variable place
 
 - No automated tests exist (manual verification only)
 
-## Next Milestone: v2.0 Workspaces (Planned)
+## Next Milestone: TBD
 
-**Goal:** Named project contexts with sidebar switcher, cloud sync, and command sharing.
+The v2.1 Terminal Sessions milestone is complete. The next direction is not yet decided — candidates include:
+- **v2.2 Persistence** — Implement PERS-01..PERS-06 (session restoration across restarts, scrollback history, command history)
+- **v2.0 Workspaces** — Named project contexts with sidebar switcher, cloud sync, OAuth, command sharing
+- **Windows conpty runtime** — Replace the conpty stub in `pty_backend_windows.go` with a real implementation and add a `windows-latest` CI runner (per CHECKPOINT.md Future Work)
 
-**Target features:**
-- Named workspaces with independent command sets
-- Cloudflare Workers + D1 + R2 backend for sync
-- OAuth (Google/GitHub) authentication
-- Shareable command links
+Use `/gsd-add-phase` or `/gsd-new-milestone` to plan the next milestone.
 
 ---
 
@@ -146,4 +158,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-06-08 — v2.1 Terminal Sessions milestone started*
+*Last updated: 2026-06-16 — v2.1 Terminal Sessions milestone complete (Phase 25 polish-integration shipped)*
