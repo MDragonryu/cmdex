@@ -196,7 +196,12 @@ function App() {
             if (info) {
                 setSessions(prev => [...prev, info]);
                 setActiveSessionId(info.id);
-                SetActiveSession(info.id);
+                try {
+                    await SetActiveSession(info.id);
+                } catch (activeErr) {
+                    console.error('Failed to set active session after create:', activeErr);
+                    toast.error('Session created but could not be set as active.');
+                }
                 terminalOrderRef.current = [...terminalOrderRef.current, info.id];
             }
         } catch (err) {
@@ -212,17 +217,22 @@ function App() {
 
     const closeTerminalSession = useCallback(async (id: string) => {
         if (sessions.length <= 1) return; // D-02: last tab not closeable
+        // Snapshot sessions before the await so we don't read stale closure
+        // state if another action mutates `sessions` mid-flight.
+        const wasActive = activeSessionId === id;
+        const remaining = wasActive ? sessions.filter(s => s.id !== id) : [];
+        const next = remaining[0];
         try {
             await CloseSession(id);
             setSessions(prev => prev.filter(s => s.id !== id));
             terminalOrderRef.current = terminalOrderRef.current.filter(tid => tid !== id);
-            // If closing the active session, auto-select nearest remaining
-            if (activeSessionId === id) {
-                const remaining = sessions.filter(s => s.id !== id);
-                const next = remaining[0];
-                if (next) {
-                    setActiveSessionId(next.id);
-                    SetActiveSession(next.id);
+            if (wasActive && next) {
+                setActiveSessionId(next.id);
+                try {
+                    await SetActiveSession(next.id);
+                } catch (activeErr) {
+                    console.error('Failed to set next active session after close:', activeErr);
+                    toast.error('Session closed but could not switch active session.');
                 }
             }
         } catch (err) {
@@ -244,9 +254,14 @@ function App() {
         }
     }, []);
 
-    const switchTerminalSession = useCallback((id: string) => {
+    const switchTerminalSession = useCallback(async (id: string) => {
         setActiveSessionId(id);
-        SetActiveSession(id);
+        try {
+            await SetActiveSession(id);
+        } catch (err) {
+            console.error('Failed to set active session:', err);
+            toast.error('Could not switch active session.');
+        }
     }, []);
 
     const handleReorderTerminalTabs = useCallback((reordered: SessionInfo[]) => {
@@ -254,14 +269,14 @@ function App() {
     }, []);
 
     // Focus detection: returns true if keyboard focus is inside the terminal pane
-    // (including the xterm.js hidden textarea used for keyboard input)
+    // chrome (tabs, clear button, etc.) but NOT on the xterm.js hidden textarea
+    // — when the user is typing into the shell, Ctrl+W must reach the shell
+    // for word-deletion, not close the active session.
     const isFocusInTerminalPane = useCallback((): boolean => {
-        const el = document.activeElement;
+        const el = document.activeElement as HTMLElement | null;
         if (!el) return false;
-        return !!(
-            (el as HTMLElement).closest?.('.terminal-pane') ||
-            (el as HTMLElement).closest?.('.xterm-helper-textarea')
-        );
+        if (el.classList?.contains('xterm-helper-textarea')) return false;
+        return !!el.closest?.('.terminal-pane');
     }, []);
 
     const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {

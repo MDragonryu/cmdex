@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -624,8 +623,12 @@ func TestTerminalService_OutputIsolation(t *testing.T) {
 		t.Fatalf("CreateSession B failed: %v", err)
 	}
 
-	s.Write(infoA.ID, "echo AAA\n")
-	s.Write(infoB.ID, "echo BBB\n")
+	if err := s.Write(infoA.ID, "echo AAA\n"); err != nil {
+		t.Fatalf("Write to session A failed: %v", err)
+	}
+	if err := s.Write(infoB.ID, "echo BBB\n"); err != nil {
+		t.Fatalf("Write to session B failed: %v", err)
+	}
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -679,16 +682,15 @@ func TestTerminalService_NamespacedEvents(t *testing.T) {
 	}
 }
 
-// cwdInheritanceTestDB opens a test DB, swaps the package-level `db` var to
-// point at it, and registers a cleanup that restores the previous value and
-// closes the test DB. Mirrors the save/restore pattern from
-// execution_service_test.go:testDBCreateCommand. If NewDB fails (no home dir,
-// no permissions, etc.) the test is skipped — same guard as TestRunCommand_*.
+// cwdInheritanceTestDB opens an isolated in-memory test DB, runs migrations,
+// swaps the package-level `db` var to point at it, and returns a cleanup func
+// that restores the previous value and closes the test DB. Using an in-memory
+// DB avoids touching the user's real ~/.cmdex/cmdex.db during testing.
 func cwdInheritanceTestDB(t *testing.T) func() {
 	t.Helper()
-	testDB, err := NewDB()
-	if err != nil {
-		t.Skipf("cannot open test DB: %v", err)
+	testDB := newTestDB(t)
+	if err := testDB.runMigrations(); err != nil {
+		t.Fatalf("runMigrations failed: %v", err)
 	}
 	prevDB := db
 	db = testDB
@@ -730,8 +732,7 @@ func TestTerminalService_GlobalDefaultCwdInheritance(t *testing.T) {
 
 	// Unique token so this test does not collide with concurrent test runs
 	// that share the user's ~/.cmdex/cmdex.db.
-	token := fmt.Sprintf("wd-test-%d", time.Now().UnixNano())
-	wdPath := "/tmp/cmdex-test-wd-" + token
+	wdPath := t.TempDir()
 
 	setGlobalDefaultCwd(t, wdPath)
 
@@ -780,9 +781,8 @@ func TestTerminalService_CwdInheritance_ExistingSessionUnaffected(t *testing.T) 
 	}
 	defer cwdInheritanceTestDB(t)()
 
-	token := fmt.Sprintf("p-test-%d", time.Now().UnixNano())
-	p1 := "/tmp/cmdex-test-p1-" + token
-	p2 := "/tmp/cmdex-test-p2-" + token
+	p1 := t.TempDir()
+	p2 := t.TempDir()
 
 	setGlobalDefaultCwd(t, p1)
 

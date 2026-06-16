@@ -53,6 +53,7 @@ type sessionState struct {
 	running         bool
 	starting        bool
 	intentionalStop bool
+	closed          bool
 
 	readerWg     sync.WaitGroup
 	outputCh     chan string
@@ -212,6 +213,7 @@ func (s *TerminalService) CreateSession() (*SessionInfo, error) {
 	ss.mu.Lock()
 	if err := s.startSessionLocked(ss, 80, 24); err != nil {
 		ss.mu.Unlock()
+		ss.stopEmitter()
 		s.mu.Lock()
 		delete(s.sessions, id)
 		if s.activeSessionID == id {
@@ -268,6 +270,7 @@ func (s *TerminalService) CloseSession(id string) error {
 	ss.ptmx = nil
 	ss.cmd = nil
 	ss.running = false
+	ss.closed = true
 	ss.mu.Unlock()
 	s.mu.Unlock()
 
@@ -590,6 +593,10 @@ func (s *TerminalService) Write(sessionId string, data string) error {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
+	if ss.closed {
+		return fmt.Errorf("session closed: %s", sessionId)
+	}
+
 	if !ss.running {
 		if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
 			return err
@@ -625,6 +632,10 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
+	if ss.closed {
+		return fmt.Errorf("session closed: %s", sessionId)
+	}
+
 	if ss.ptmx == nil {
 		return fmt.Errorf("terminal not started")
 	}
@@ -642,6 +653,10 @@ func (s *TerminalService) Clear(sessionId string) error {
 
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
+
+	if ss.closed {
+		return fmt.Errorf("session closed: %s", sessionId)
+	}
 
 	if ss.ptmx == nil {
 		return fmt.Errorf("terminal not started")
@@ -674,6 +689,10 @@ func (s *TerminalService) Start(sessionId string, cols, rows int) error {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
+	if ss.closed {
+		return fmt.Errorf("session closed: %s", sessionId)
+	}
+
 	return s.startSessionLocked(ss, cols, rows)
 }
 
@@ -685,6 +704,10 @@ func (s *TerminalService) Stop(sessionId string) error {
 	}
 
 	ss.mu.Lock()
+	if ss.closed {
+		ss.mu.Unlock()
+		return fmt.Errorf("session closed: %s", sessionId)
+	}
 	ss.intentionalStop = true
 	ss.stopSessionLocked()
 

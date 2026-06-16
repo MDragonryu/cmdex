@@ -606,7 +606,7 @@ body {
   font-size: 13px;
   font-family: inherit;
   color: var(--foreground);
-  background: var(--input-background);
+  background: var(--input);
   border: 1px solid var(--border);
   border-radius: 3px;
   outline: none;
