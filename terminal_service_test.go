@@ -12,7 +12,7 @@ import (
 
 func newTestTerminalService(t *testing.T) *TerminalService {
 	t.Helper()
-	s := &TerminalService{}
+	s := &TerminalService{ptyBackend: newPtyBackend()}
 	s.sessions = make(map[string]*sessionState)
 	return s
 }

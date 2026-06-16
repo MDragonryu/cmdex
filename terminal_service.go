@@ -37,7 +37,7 @@ type sessionState struct {
 	createdAt       time.Time
 
 	mu              sync.Mutex
-	ptmx            *os.File
+	ptmx            ptyHandle
 	cmd             *exec.Cmd
 	shellPath       string
 	shellFlag       string
@@ -60,6 +60,7 @@ type TerminalService struct {
 	sessions        map[string]*sessionState
 	activeSessionID string
 	sessionCounter  int
+	ptyBackend      ptyBackend
 }
 
 // info returns the public SessionInfo for this session.
@@ -127,6 +128,7 @@ func (s *TerminalService) ServiceStartup(ctx context.Context, options applicatio
 	terminalSvc = s
 
 	s.sessions = make(map[string]*sessionState)
+	s.ptyBackend = newPtyBackend()
 
 	_, err := s.CreateSession()
 	if err != nil {
@@ -246,7 +248,7 @@ func (s *TerminalService) CloseSession(id string) error {
 		oldPtmx.Close()
 	}
 	if oldCmd != nil && oldCmd.ProcessState == nil {
-		killProcessGroup(oldCmd)
+		s.ptyBackend.Kill(oldCmd)
 	}
 	ss.readerWg.Wait()
 	ss.stopEmitter()
@@ -340,12 +342,12 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		oldPtmx.Close()
 	}
 	if oldCmd != nil && oldCmd.ProcessState == nil {
-		killProcessGroup(oldCmd)
+		s.ptyBackend.Kill(oldCmd)
 	}
 	ss.readerWg.Wait()
 	ss.readerWg.Wait()
 
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, rows, cols)
+	handle, cmd, err := s.ptyBackend.Start(shellPath, shellFlag, rows, cols)
 
 	ss.mu.Lock()
 	ss.starting = false
@@ -357,15 +359,15 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.shellPath = shellPath
 	ss.shellFlag = shellFlag
 	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
-	ss.ptmx = ptmx
+	ss.ptmx = handle
 	ss.cmd = cmd
 	ss.stopCh = make(chan struct{})
 	ss.running = true
 
 	stopCh := ss.stopCh
 	ss.readerWg.Add(1)
-	go ss.readLoop(ptmx, stopCh)
-	go s.monitorExit(ss, cmd, ptmx, stopCh)
+	go ss.readLoop(handle, stopCh)
+	go s.monitorExit(ss, cmd, handle, stopCh)
 
 	return nil
 }
@@ -380,7 +382,7 @@ func (ss *sessionState) stopSessionLocked() {
 }
 
 // readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to enqueueOutput.
-func (ss *sessionState) readLoop(ptmx *os.File, stopCh chan struct{}) {
+func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 	defer ss.readerWg.Done()
 
 	buf := make([]byte, 8192)
@@ -505,7 +507,7 @@ func (ss *sessionState) enqueueOutput(data string) {
 }
 
 // monitorExit watches for shell exit and handles event emission and auto-restart.
-func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx *os.File, stopCh chan struct{}) {
+func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyHandle, stopCh chan struct{}) {
 	err := cmd.Wait()
 
 	select {
@@ -600,7 +602,7 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 	}
 
 	ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
-	return ptyResize(ss.ptmx, cols, rows)
+	return s.ptyBackend.Resize(ss.ptmx, cols, rows)
 }
 
 // Clear sends the ANSI clear sequence and emits a namespaced clear event.
@@ -669,7 +671,7 @@ func (s *TerminalService) Stop(sessionId string) error {
 		oldPtmx.Close()
 	}
 	if oldCmd != nil && oldCmd.ProcessState == nil {
-		killProcessGroup(oldCmd)
+		s.ptyBackend.Kill(oldCmd)
 	}
 	ss.readerWg.Wait()
 
