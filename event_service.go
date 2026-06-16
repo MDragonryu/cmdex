@@ -8,7 +8,6 @@ import (
 
 // EventNames holds all Wails event name constants, exposed to frontend via GetEventNames().
 type EventNames struct {
-	CmdExecuting          string `json:"cmdExecuting"`
 	OpenSettings          string `json:"openSettings"`
 	OpenShortcuts         string `json:"openShortcuts"`
 	SettingsChanged       string `json:"settingsChanged"`
@@ -16,7 +15,6 @@ type EventNames struct {
 }
 
 var eventNames = EventNames{
-	CmdExecuting:          "cmd-executing",
 	OpenSettings:          "open-settings",
 	OpenShortcuts:         "open-shortcuts",
 	SettingsChanged:       "settings-changed",
