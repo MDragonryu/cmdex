@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: milestone
-status: executing
-last_updated: "2026-06-16T07:31:29.472Z"
-last_activity: 2026-06-16 -- Phase null execution started
+status: ready_for_verification
+last_updated: "2026-06-16T07:43:18.881Z"
+last_activity: 2026-06-16 -- Phase 25 plan 03 complete (MaxSessions guard + Windows conpty verification checkpoint)
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 12
-  completed_plans: 11
-  percent: 60
+  completed_plans: 12
+  percent: 80
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase null — polish-integration
+**Current focus:** Phase 25 — polish-integration (4/4 plans complete; ready for verification)
 
 ## Current Position
 
-Phase: null (polish-integration) — EXECUTING
+Phase: 25 (polish-integration) — ready_for_verification
 Plan: 4 of 4
-Status: Executing Phase null
-Last activity: 2026-06-16 -- Phase null execution started
+Status: All 4 plans complete (25-01, 25-02, 25-03, 25-04); phase awaits /gsd-verify-work
+Last activity: 2026-06-16 -- Phase 25 plan 03 complete (MaxSessions guard + Windows conpty verification checkpoint)
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Last activity: 2026-06-16 -- Phase null execution started
 | Phase 25 P01 | 9min | 2 tasks | 5 files |
 | Phase 25 P04 | 1min | 1 tasks | 2 files |
 | Phase 25 P02 | 7min | 2 tasks | 5 files |
+| Phase 25 P03 | 4 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,8 @@ Visual parallelism between the two cwd-resolution paths makes the contract recog
 
 The plan said terminal_service_test.go but newTestTerminalServiceWithMock is itself darwin-tagged (Plan 25-01); referencing a build-tagged function from a non-tagged _test.go would break non-darwin test compilation. The test function and acceptance criteria are unchanged. — TestTerminalService_StressCreateClose placed in new //go:build darwin file (terminal_service_stress_test.go) instead of terminal_service_test.go
 The plan said terminal_service_test.go but newTestTerminalServiceWithMock is itself darwin-tagged (Plan 25-01); referencing a build-tagged function from a non-tagged _test.go would break non-darwin test compilation. The test function and acceptance criteria are unchanged.
+
+- [Phase 25]: MaxSessions = 10 guard added to CreateSession to prevent unbounded resource use
 
 ### Blockers/Concerns
 
@@ -142,4 +145,4 @@ The plan said terminal_service_test.go but newTestTerminalServiceWithMock is its
 
 ---
 
-*Last updated: 2026-05-04*
+*Last updated: 2026-06-16*

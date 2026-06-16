@@ -132,7 +132,7 @@ Plans:
 4. Dead-code cleanup: no remnants of OutputPane, cmd-output event, or RunInTerminal in the source
 5. Error states: max sessions limit enforced, last-session close guarded, PTY start failure surfaced as a toast
 
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 
 **UI hint**: no
 
@@ -146,7 +146,7 @@ Plans:
 | 22. Database Persistence | 0/0 | Not started | - |
 | 23. Frontend Tabbed Terminal | 3/3 | Complete   | 2026-06-10 |
 | 24. Session-Aware Execution | 2/2 | Complete   | 2026-06-16 |
-| 25. Polish & Integration | 3/4 | In Progress|  |
+| 25. Polish & Integration | 4/4 | Complete   | 2026-06-16 |
 
 **Execution order:** 21 → 22 → 23 → 24 → 25 (serial — each phase depends on the prior)
 
