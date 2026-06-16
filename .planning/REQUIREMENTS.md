@@ -34,13 +34,6 @@ Requirements for v2.1 Terminal Sessions milestone. Each maps to roadmap phases.
 - [ ] **UI-05**: Session theme matches app theme (CSS variables)
 - [ ] **UI-06**: Clear terminal button clears only the active session
 
-### Session Persistence
-
-- [ ] **PERS-01**: Terminal sessions persist across app restarts (name, working dir, shell)
-- [ ] **PERS-02**: On startup, previous sessions are restored and available in tab bar
-- [ ] **PERS-03**: Session working directory is restored (per-command → global default → OS home fallback)
-- [ ] **PERS-04**: Active session is remembered and auto-selected on restart
-
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -57,6 +50,13 @@ Deferred to future release. Tracked but not in current roadmap.
 - **SESS-11**: User can share session output via link (read-only)
 
 ### Enhanced Persistence
+
+#### Session Persistence (deferred from v1)
+
+- [ ] **PERS-01**: Terminal sessions persist across app restarts (name, working dir, shell)
+- [ ] **PERS-02**: On startup, previous sessions are restored and available in tab bar
+- [ ] **PERS-03**: Session working directory is restored (per-command → global default → OS home fallback)
+- [ ] **PERS-04**: Active session is remembered and auto-selected on restart
 
 - **PERS-05**: Session scrollback history persisted across restarts
 - **PERS-06**: Shell command history persisted per session
@@ -95,15 +95,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-04 | Phase 23 | Pending |
 | UI-05 | Phase 23 | Pending |
 | UI-06 | Phase 23 | Pending |
-| PERS-01 | Phase 22 | Pending |
-| PERS-02 | Phase 22 | Pending |
-| PERS-03 | Phase 22 | Pending |
-| PERS-04 | Phase 22 | Pending |
+| PERS-01 | v2 (deferred) | Pending |
+| PERS-02 | v2 (deferred) | Pending |
+| PERS-03 | v2 (deferred) | Pending |
+| PERS-04 | v2 (deferred) | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: 22
+- v1 requirements: 18 total
+- Mapped to phases: 18
 - Unmapped: 0 ✓
+- v2 requirements: 10 total (4 deferred from v1, 6 originally deferred)
 
 ---
 *Requirements defined: 2026-06-08*

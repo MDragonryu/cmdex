@@ -126,13 +126,13 @@ Plans:
 
 **Success Criteria** (what must be TRUE):
 
-1. Sessions created via UI persist across app restarts and restore correctly (end-to-end)
-2. Session working directory integrates with global default setting from Settings window
-3. Active session selection persists across restarts
-4. No memory leaks: rapid create/close cycles don't leak xterm instances or PTY processes
-5. Windows conpty compatibility verified (PTY spawn, resize, I/O, shell detection)
+1. No memory leaks: rapid create/close cycles (100x) leave goroutine count stable, sessions map empty, and PTY FDs closed
+2. Windows conpty compatibility: code cross-compiles to Windows and the conpty stub is in place; full runtime verification deferred
+3. Global default cwd inheritance: new sessions inherit the global default working directory at creation; existing sessions unchanged
+4. Dead-code cleanup: no remnants of OutputPane, cmd-output event, or RunInTerminal in the source
+5. Error states: max sessions limit enforced, last-session close guarded, PTY start failure surfaced as a toast
 
-**Plans:** 1/4 plans executed
+**Plans:** 4 plans
 
 **UI hint**: no
 
