@@ -129,6 +129,8 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 ## Tests
 
 - Go: `db_test.go` — three migration tests (`TestFreshDBMigrations`, `TestExistingDBIdempotent`, `TestRollbackTo`). Run with `go test ./...`.
+- Go: `terminal_service_test.go` + `terminal_service_stress_test.go` + `terminal_service_max_sessions_test.go` — multi-session CRUD, cwd inheritance, 100-cycle stress test, and MaxSessions limit test. Stress and max-sessions tests are `//go:build darwin` (use the mock backend from `pty_backend_mock_test.go`).
+- **Windows conpty verification gap:** The conpty backend in `pty_backend_windows.go` is a stub that returns "not implemented" errors. Runtime conpty testing is not done in this milestone — see `.planning/phases/25-polish-integration/CHECKPOINT.md` for the full gap documentation.
 - No frontend tests exist yet.
 - `make check` and CI run `go build ./...` + `pnpm tsc --noEmit` only.
 
