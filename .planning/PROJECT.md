@@ -62,10 +62,11 @@ Users can organize commands by project context, execute them with variable place
 
 ## Next Milestone: TBD
 
-The v2.1 Terminal Sessions milestone is complete. The next direction is not yet decided — candidates include:
-- **v2.2 Persistence** — Implement PERS-01..PERS-06 (session restoration across restarts, scrollback history, command history)
-- **v2.0 Workspaces** — Named project contexts with sidebar switcher, cloud sync, OAuth, command sharing
-- **Windows conpty runtime** — Replace the conpty stub in `pty_backend_windows.go` with a real implementation and add a `windows-latest` CI runner (per CHECKPOINT.md Future Work)
+The v2.1 Terminal Sessions milestone is complete. The next direction is not yet decided.
+
+Remaining technical work (from Phase 25 CHECKPOINT.md and the v2 deferred requirements):
+- **PERS-01..PERS-06** — session persistence across restarts, scrollback history, command history
+- **Windows conpty runtime** — replace the conpty stub in `pty_backend_windows.go` with a real implementation and add a `windows-latest` CI runner
 
 Use `/gsd-new-milestone` to plan the next milestone.
 
@@ -131,7 +132,7 @@ Use `/gsd-new-milestone` to plan the next milestone.
 
 - Real-time collaboration (sync is eventual, not live)
 - Mobile app (desktop-first)
-- Email/password auth (OAuth-only) — if/when v2.0 Workspaces ships
+- Email/password auth (OAuth-only)
 - Team/organization management (personal tool)
 - Full tmux-style pane management (UI complexity, not requested)
 - Background session notifications (complex, low priority)

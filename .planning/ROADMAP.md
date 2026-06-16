@@ -3,7 +3,6 @@
 ## Milestones
 
 - ✅ **v2.1 Terminal Sessions** — Phases 21, 23, 24, 25 (shipped 2026-06-16) — [archive](milestones/v2.1-ROADMAP.md)
-- 🚧 **v2.2 Persistence** — TBD (next milestone)
 
 ## Phases
 
@@ -18,10 +17,6 @@
 > Phase 22 (Database Persistence) was scoped out during Phase 25 D-02/D-03. PERS-01..PERS-04 deferred to v2. See archive for details.
 
 </details>
-
-### 🚧 v2.2 Persistence (Planned)
-
-- [ ] TBD — Use `/gsd-new-milestone` to plan
 
 ## Progress
 
