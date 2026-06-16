@@ -1,155 +1,38 @@
-# Roadmap: Cmdex v2.1 Terminal Sessions
+# Roadmap: Cmdex
 
-**Milestone:** v2.1
-**Name:** Terminal Sessions
-**Goal:** Enable multiple terminal sessions where commands execute on the user's active (selected) session, allowing long-running CLI processes to run alongside other commands.
+## Milestones
 
----
+- ✅ **v2.1 Terminal Sessions** — Phases 21, 23, 24, 25 (shipped 2026-06-16) — [archive](milestones/v2.1-ROADMAP.md)
+- 🚧 **v2.2 Persistence** — TBD (next milestone)
 
-## Phase 21: Backend Session Foundation
+## Phases
 
-**Goal:** Backend can manage multiple terminal sessions with isolated PTYs, and long-running processes persist across session switches.
+<details>
+<summary>✅ v2.1 Terminal Sessions (Phases 21, 23, 24, 25) — SHIPPED 2026-06-16</summary>
 
-**Depends on:** v2.0 Terminal Integration (phases 16-20 complete)
+- [x] Phase 21: Backend Session Foundation (3/3 plans) — completed 2026-06-10
+- [x] Phase 23: Frontend Tabbed Terminal (3/3 plans) — completed 2026-06-10
+- [x] Phase 24: Session-Aware Execution (2/2 plans) — completed 2026-06-16
+- [x] Phase 25: Polish & Integration (4/4 plans) — completed 2026-06-16
 
-**Requirements:** SESS-01, SESS-04, SESS-05, EXEC-04
+> Phase 22 (Database Persistence) was scoped out during Phase 25 D-02/D-03. PERS-01..PERS-04 deferred to v2. See archive for details.
 
-**Success Criteria** (what must be TRUE):
+</details>
 
-1. Backend can create a new terminal session with a default name and return its session ID
-2. Backend can list all active sessions with their metadata (name, status, working directory, shell)
-3. Backend can rename a session by ID
-4. Backend can close a session by ID, cleaning up its PTY and process group
-5. When switching active session, the previous session's PTY process continues running (verify: `sleep 30` in session A, switch to B, session A still running)
-6. Namespaced events (`pty-output:{sessionId}`, `pty-exit:{sessionId}`, `pty-cleared:{sessionId}`) route output correctly per session
-7. SessionService uses a mutex-protected map — no global state collision
+### 🚧 v2.2 Persistence (Planned)
 
-**Plans:** 3 plans
-Plans:
-
-- [ ] 21-01-PLAN.md — Session types, struct refactoring, CRUD API (CreateSession, ListSessions, CloseSession, RenameSession, active session)
-- [ ] 21-02-PLAN.md — Per-session PTY lifecycle, namespaced events, ServiceStartup/Shutdown
-- [ ] 21-03-PLAN.md — Frontend event wiring, Wails bindings, multi-session Go tests
-
-**UI hint**: no
-
----
-
-## Phase 22: Database Persistence
-
-**Goal:** Terminal sessions persist across app restarts with all metadata restored and active session remembered.
-
-**Depends on:** Phase 21
-
-**Requirements:** PERS-01, PERS-02, PERS-03, PERS-04
-
-**Success Criteria** (what must be TRUE):
-
-1. On app startup, previous sessions are loaded from SQLite and available via SessionService
-2. Session metadata (name, working directory, shell) is correctly restored for each session
-3. The previously active session is marked active and auto-selected in the tab bar
-4. Working directory fallback chain works: per-command → global default → OS home
-
-**Plans:** TBD
-
-**UI hint**: no
-
----
-
-## Phase 23: Frontend Tabbed Terminal
-
-**Goal:** Users can manage and interact with multiple terminal sessions through a tabbed interface with full keyboard and mouse support.
-
-**Depends on:** Phase 21, Phase 22
-
-**Requirements:** SESS-02, SESS-03, SESS-06, UI-01, UI-02, UI-03, UI-04, UI-05, UI-06
-
-**Success Criteria** (what must be TRUE):
-
-1. User sees a tab bar listing all terminal sessions with names
-2. User can switch sessions by clicking tabs — terminal output updates instantly
-3. User can reorder tabs via drag-and-drop
-4. Each tab shows session name and status indicator (idle/running/busy)
-5. Right-clicking a tab shows context menu with rename, close, duplicate options
-6. Keyboard shortcuts work: Ctrl+T (new), Ctrl+W (close), Ctrl+Tab (next), Ctrl+Shift+Tab (prev)
-7. Each session preserves 5000 lines of scrollback independently
-8. Terminal theme matches app theme via CSS variables (no hardcoded colors)
-9. Clear button clears only the active session's terminal
-
-**Plans:** 3/3 plans complete
-
-- [x] 23-01-PLAN.md — TerminalTabBar component with drag-and-drop reorder, right-click context menu, status indicators, SessionInfo type, CSS
-- [x] 23-02-PLAN.md — App.tsx session state management, multi-mount TerminalComponents, TerminalTabBar wiring, clear/copy button refactor
-- [x] 23-03-PLAN.md — Keyboard shortcuts with focus-dependent dispatch (Ctrl+T/W/Tab/Shift+Tab) for terminal vs command tabs
-
-**UI hint**: yes
-
----
-
-## Phase 24: Session-Aware Execution
-
-**Goal:** Users can execute saved commands in the active terminal session with full variable resolution, working directory support, and real-time output streaming.
-
-**Depends on:** Phase 21, Phase 23
-
-**Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-05, EXEC-06
-
-**Success Criteria** (what must be TRUE):
-
-1. Clicking Run on a saved command executes it in the active session's terminal
-2. Command variables (CEL defaults, env, prompts) are resolved before sending to session
-3. Command working directory is applied (per-command → global default → session cwd)
-4. Command output streams to the active session's terminal in real-time with ANSI support
-5. User can press Ctrl+C to interrupt a running command in the active session
-
-**Plans:** 2/2 plans complete
-Plans:
-**Wave 1**
-
-- [x] 24-01-PLAN.md — Go side: refactor RunCommand to direct terminalSvc.Write, delete RunInTerminal/GetExecutionHistory/ClearExecutionHistory, drop CmdExecuting from EventNames, add testWithTerminalSvc helper + 3 new tests
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 24-02-PLAN.md — Frontend cleanup: remove cmd-executing subscription + activeSessionId prop from Terminal.tsx, delete OutputPane.tsx, clean i18n/CSS/e2e selectors/mocks, regenerate Wails bindings
-
-**UI hint**: no
-
----
-
-## Phase 25: Polish & Integration
-
-**Goal:** All session features work cohesively with settings, persistence, edge cases handled, and cross-platform verified.
-
-**Depends on:** Phase 22, Phase 23, Phase 24
-
-**Requirements:** (integrates all prior — no new requirements)
-
-**Success Criteria** (what must be TRUE):
-
-1. No memory leaks: rapid create/close cycles (100x) leave goroutine count stable, sessions map empty, and PTY FDs closed
-2. Windows conpty compatibility: code cross-compiles to Windows and the conpty stub is in place; full runtime verification deferred
-3. Global default cwd inheritance: new sessions inherit the global default working directory at creation; existing sessions unchanged
-4. Dead-code cleanup: no remnants of OutputPane, cmd-output event, or RunInTerminal in the source
-5. Error states: max sessions limit enforced, last-session close guarded, PTY start failure surfaced as a toast
-
-**Plans:** 4/4 plans complete
-
-**UI hint**: no
-
----
+- [ ] TBD — Use `/gsd-new-milestone` to plan
 
 ## Progress
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 21. Backend Session Foundation | 0/3 | Not started | - |
-| 22. Database Persistence | 0/0 | Not started | - |
-| 23. Frontend Tabbed Terminal | 3/3 | Complete   | 2026-06-10 |
-| 24. Session-Aware Execution | 2/2 | Complete   | 2026-06-16 |
-| 25. Polish & Integration | 4/4 | Complete    | 2026-06-16 |
-
-**Execution order:** 21 → 22 → 23 → 24 → 25 (serial — each phase depends on the prior)
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 21. Backend Session Foundation | v2.1 | 3/3 | Complete | 2026-06-10 |
+| 22. Database Persistence | v2.1 (scoped out) | 0/0 | Deferred | - |
+| 23. Frontend Tabbed Terminal | v2.1 | 3/3 | Complete | 2026-06-10 |
+| 24. Session-Aware Execution | v2.1 | 2/2 | Complete | 2026-06-16 |
+| 25. Polish & Integration | v2.1 | 4/4 | Complete | 2026-06-16 |
 
 ---
 
-*Last updated: 2026-06-15*
+*Last updated: 2026-06-16 after v2.1 milestone archive*

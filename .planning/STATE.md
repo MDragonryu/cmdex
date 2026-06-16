@@ -1,32 +1,31 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.1
-milestone_name: milestone
-status: verifying
-last_updated: "2026-06-16T08:03:11.302Z"
+milestone_name: terminal-sessions
+status: shipped
+last_updated: "2026-06-16T15:30:00.000Z"
 last_activity: 2026-06-16
 progress:
-  total_phases: 5
+  total_phases: 4
   completed_phases: 4
   total_plans: 12
   completed_plans: 12
-  percent: 80
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-23)
+See: .planning/PROJECT.md (updated 2026-06-16)
 
-**Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase 25 — polish-integration (4/4 plans complete; ready for verification)
+**Core value:** Users can organize commands by project context, execute with variables, run long-running processes in dedicated terminal sessions alongside other commands, and share
+**Current focus:** Milestone v2.1 shipped; awaiting `/gsd-new-milestone` for v2.2+ planning
 
 ## Current Position
 
-Phase: 25
-Plan: Not started
-Status: All 4 plans complete (25-01, 25-02, 25-03, 25-04); phase awaits /gsd-verify-work
+Milestone: v2.1 — SHIPPED 2026-06-16
+Status: Archived to `.planning/milestones/v2.1-ROADMAP.md` and `v2.1-REQUIREMENTS.md`
 Last activity: 2026-06-16
 
 ## Performance Metrics
