@@ -99,12 +99,19 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-02 | v2 (deferred) | Pending |
 | PERS-03 | v2 (deferred) | Pending |
 | PERS-04 | v2 (deferred) | Pending |
+| SESS-07 | v2 (deferred) | Pending |
+| SESS-08 | v2 (deferred) | Pending |
+| SESS-09 | v2 (deferred) | Pending |
+| SESS-10 | v2 (deferred) | Pending |
+| SESS-11 | v2 (deferred) | Pending |
+| PERS-05 | v2 (deferred) | Pending |
+| PERS-06 | v2 (deferred) | Pending |
 
 **Coverage:**
 - v1 requirements: 18 total
 - Mapped to phases: 18
 - Unmapped: 0 ✓
-- v2 requirements: 10 total (4 deferred from v1, 6 originally deferred)
+- v2 requirements: 11 total (4 deferred from v1, 7 originally deferred)
 
 ---
 *Requirements defined: 2026-06-08*
