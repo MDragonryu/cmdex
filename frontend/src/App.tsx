@@ -115,7 +115,6 @@ function App() {
     const allCommandsRef = useRef<Command[]>([]);
     const [selectedCommand, setSelectedCommand] = useState<Command | null>(null);
     const [modal, setModal] = useState<ModalState>({ type: 'none' });
-    const [isExecuting, setIsExecuting] = useState(false);
 
     const [serverVariables, setServerVariables] = useState<VarPromptType[]>([]);
     const [currentResolvedValues, setCurrentResolvedValues] = useState<Record<string, string>>({});
@@ -194,6 +193,13 @@ function App() {
         try {
             const info = await CreateSession();
             if (info) {
+                // Mutate terminalOrderRef BEFORE the await so the re-render
+                // triggered by setSessions/setActiveSessionId sees the new id.
+                // Refs are not reactive — mutating after the await would leave
+                // the ref missing the new id during the re-render, so the
+                // TerminalComponent for this id would never mount (regression
+                // from 0c5b41a when SetActiveSession became awaited).
+                terminalOrderRef.current = [...terminalOrderRef.current, info.id];
                 setSessions(prev => [...prev, info]);
                 setActiveSessionId(info.id);
                 try {
@@ -202,7 +208,6 @@ function App() {
                     console.error('Failed to set active session after create:', activeErr);
                     toast.error('Session created but could not be set as active.');
                 }
-                terminalOrderRef.current = [...terminalOrderRef.current, info.id];
             }
         } catch (err) {
             console.error('Failed to create terminal session:', err);
@@ -213,7 +218,7 @@ function App() {
                 toast.error('Could not create session. Check that the terminal backend is running.');
             }
         }
-    }, []);
+    }, [t]);
 
     const closeTerminalSession = useCallback(async (id: string) => {
         if (sessions.length <= 1) return; // D-02: last tab not closeable
@@ -268,14 +273,13 @@ function App() {
         setSessions(reordered);
     }, []);
 
-    // Focus detection: returns true if keyboard focus is inside the terminal pane
-    // chrome (tabs, clear button, etc.) but NOT on the xterm.js hidden textarea
-    // — when the user is typing into the shell, Ctrl+W must reach the shell
-    // for word-deletion, not close the active session.
+    // Focus detection: returns true if keyboard focus is anywhere inside the
+    // terminal pane (including the xterm.js hidden textarea used for shell input).
+    // The xterm-helper-textarea is rendered as a descendant of the mount point,
+    // so the single .terminal-pane ancestor check covers all terminal focus states.
     const isFocusInTerminalPane = useCallback((): boolean => {
         const el = document.activeElement as HTMLElement | null;
         if (!el) return false;
-        if (el.classList?.contains('xterm-helper-textarea')) return false;
         return !!el.closest?.('.terminal-pane');
     }, []);
 
@@ -357,6 +361,7 @@ function App() {
     }, []);
 
     // Track per-session running status via pty-exit events
+    const sessionIdsKey = sessions.map(s => s.id).join(',');
     useEffect(() => {
         if (!eventsInitialized) return;
         const cleanups: (() => void)[] = [];
@@ -375,7 +380,8 @@ function App() {
         sessions.forEach(s => subscribeSession(s.id));
 
         return () => cleanups.forEach(fn => fn());
-    }, [sessions.map(s => s.id).join(','), eventsInitialized]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- use sessionIdsKey to avoid re-subscribing when only session.running changes
+    }, [sessionIdsKey, eventsInitialized]);
 
     useEffect(() => {
         applyTheme(theme);
@@ -1002,7 +1008,6 @@ function App() {
         const execTabId = activeTabIdRef.current;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
-        setIsExecuting(true);
         expandTerminal();
 
         try {
@@ -1012,14 +1017,13 @@ function App() {
                     toast.error(t('toast.commandFailed', { code: result.exitCode ?? -1 }));
                 }
             }
-        } catch (err) {
+        } catch {
             if (execTabId === activeTabIdRef.current) {
                 toast.error(t('toast.commandFailed', { code: -1 }));
             }
         } finally {
             executingTabIdRef.current = null;
             setExecutingTabIdState(null);
-            setIsExecuting(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, [t]);
@@ -1415,8 +1419,6 @@ function App() {
         return map;
     }, [tabDrafts, openTabs]);
 
-    const isWelcome = !selectedCommand && !activeDraft;
-
     // Only the executing tab should receive isExecuting=true (prevents React.memo
     // bypass on all mounted CommandDetail instances when execution state changes).
     // Driven by state so the executing tab remains pinned even if user switches tabs.
@@ -1602,6 +1604,7 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
+                                {/* eslint-disable-next-line react-hooks/refs -- intentional: terminalOrderRef tracks stable iteration order; pair with setSessions() updates to trigger re-render */}
                                 {terminalOrderRef.current.map((id) => {
                                     const session = sessions.find(s => s.id === id);
                                     if (!session) return null;

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import '../utils/types';
 
 const SCRIPT_TEXTAREA = '[data-testid="command-script"] textarea';
 const SIDEBAR_CMD_TITLE = '.cmd-title';
@@ -31,12 +32,6 @@ test.describe('Commands', () => {
     await page.locator('[data-testid="sidebar-add-command"]').click();
     await page.waitForTimeout(300);
 
-    // Trigger title reveal by setting the draft directly via window evaluation,
-    // since the Add-title pill is behind tooltip overlays.
-    await page.evaluate(() => {
-      const app = (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    });
-    // Fallback: type script and just use the simpler approach
     await page.locator(SCRIPT_TEXTAREA).fill('echo "command with title"');
 
     await expect(page.locator(SAVE_BAR)).toBeVisible();
@@ -52,7 +47,7 @@ test.describe('Commands', () => {
   test('edits command title inline', async ({ page }) => {
     const now = new Date().toISOString();
     await page.addInitScript((ts) => {
-      (window as any).__cmdexE2E_SEED__ = {
+      window.__cmdexE2E_SEED__ = {
         commands: [
           {
             id: 'cmd-edit-1',
@@ -92,7 +87,7 @@ test.describe('Commands', () => {
   test('deletes a command via sidebar hover', async ({ page }) => {
     const now = new Date().toISOString();
     await page.addInitScript((ts) => {
-      (window as any).__cmdexE2E_SEED__ = {
+      window.__cmdexE2E_SEED__ = {
         commands: [
           {
             id: 'cmd-del-1',
@@ -138,7 +133,7 @@ test.describe('Commands', () => {
   test('opens existing command and shows content', async ({ page }) => {
     const now = new Date().toISOString();
     await page.addInitScript((ts) => {
-      (window as any).__cmdexE2E_SEED__ = {
+      window.__cmdexE2E_SEED__ = {
         commands: [
           {
             id: 'cmd-open-1',

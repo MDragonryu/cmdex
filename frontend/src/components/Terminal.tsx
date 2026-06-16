@@ -31,9 +31,13 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const backendAvailableRef = useRef(true);
   const startCalledRef = useRef(false);
   const sessionIdRef = useRef(sessionId);
+  const onShellExitRef = useRef(onShellExit);
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+  useEffect(() => {
+    onShellExitRef.current = onShellExit;
+  }, [onShellExit]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -221,7 +225,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => webglAddon.dispose());
       term.loadAddon(webglAddon);
-    } catch {
+    } catch (webglErr) {
+      // WebGL unavailable (e.g. headless or no GPU) — fall back to canvas renderer
+      console.debug('WebGL addon not available:', webglErr);
     }
 
     if (containerRef.current) {
@@ -316,7 +322,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
         console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
       }
       if (wasIntentional) {
-        onShellExit?.();
+        onShellExitRef.current?.();
       }
     });
 
