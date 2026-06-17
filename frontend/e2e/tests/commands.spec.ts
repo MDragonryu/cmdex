@@ -32,13 +32,21 @@ test.describe('Commands', () => {
     await page.locator('[data-testid="sidebar-add-command"]').click();
     await page.waitForTimeout(300);
 
-    await page.locator(SCRIPT_TEXTAREA).fill('echo "command with title"');
+    await page.locator(SCRIPT_TEXTAREA).fill('echo "hello"');
+
+    // Reveal the title input by clicking the "Add title" pill
+    // (the pill is hover-revealed; force:true bypasses opacity/pointer-events)
+    await page.locator('.add-title-pill').click({ force: true });
+    await page.waitForTimeout(200);
+
+    // Enter an explicit title different from the script content
+    await page.locator('[data-testid="command-title"]').fill('My Custom Title');
 
     await expect(page.locator(SAVE_BAR)).toBeVisible();
     await page.locator(SAVE_BTN).click();
 
     await expect(
-      page.locator(SIDEBAR_CMD_TITLE).filter({ hasText: 'echo "command with title"' }),
+      page.locator(SIDEBAR_CMD_TITLE).filter({ hasText: 'My Custom Title' }),
     ).toBeVisible({ timeout: 5000 });
   });
 

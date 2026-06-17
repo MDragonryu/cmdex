@@ -194,16 +194,16 @@ function App() {
             const info = await CreateSession();
             if (info) {
                 // Mutate terminalOrderRef BEFORE the await so the re-render
-                // triggered by setSessions/setActiveSessionId sees the new id.
-                // Refs are not reactive — mutating after the await would leave
-                // the ref missing the new id during the re-render, so the
+                // triggered by setSessions sees the new id. Refs are not
+                // reactive — mutating after the await would leave the ref
+                // missing the new id during the re-render, so the
                 // TerminalComponent for this id would never mount (regression
                 // from 0c5b41a when SetActiveSession became awaited).
                 terminalOrderRef.current = [...terminalOrderRef.current, info.id];
                 setSessions(prev => [...prev, info]);
-                setActiveSessionId(info.id);
                 try {
                     await SetActiveSession(info.id);
+                    setActiveSessionId(info.id);
                 } catch (activeErr) {
                     console.error('Failed to set active session after create:', activeErr);
                     toast.error('Session created but could not be set as active.');
@@ -232,9 +232,9 @@ function App() {
             setSessions(prev => prev.filter(s => s.id !== id));
             terminalOrderRef.current = terminalOrderRef.current.filter(tid => tid !== id);
             if (wasActive && next) {
-                setActiveSessionId(next.id);
                 try {
                     await SetActiveSession(next.id);
+                    setActiveSessionId(next.id);
                 } catch (activeErr) {
                     console.error('Failed to set next active session after close:', activeErr);
                     toast.error('Session closed but could not switch active session.');
@@ -260,9 +260,9 @@ function App() {
     }, []);
 
     const switchTerminalSession = useCallback(async (id: string) => {
-        setActiveSessionId(id);
         try {
             await SetActiveSession(id);
+            setActiveSessionId(id);
         } catch (err) {
             console.error('Failed to set active session:', err);
             toast.error('Could not switch active session.');
