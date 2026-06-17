@@ -198,7 +198,12 @@ jobs:
       - name: Install frontend deps
         run: cd frontend && pnpm install
 
+      - name: Ensure frontend/dist exists
+        run: mkdir -p frontend/dist
+        shell: bash
+
       - name: Cache frontend build
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: frontend/dist
