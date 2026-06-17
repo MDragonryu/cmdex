@@ -75,9 +75,7 @@ jobs:
         id: cache-wails
         uses: actions/cache@v4
         with:
-          path: |
-            ~/go/bin/wails3
-            ~/.go/bin/wails3
+          path: ~/go/bin/wails3
           key: wails3-${{ env.WAILS_VERSION }}-${{ runner.os }}
 
       - name: Install Wails v3 CLI
@@ -186,9 +184,7 @@ jobs:
         id: cache-wails
         uses: actions/cache@v4
         with:
-          path: |
-            ~/go/bin/wails3
-            ~/.go/bin/wails3
+          path: ${{ runner.os == 'Windows' && 'C:\Users\runneradmin\go\bin' || '~/go/bin' }}
           key: wails3-${{ env.WAILS_VERSION }}-${{ runner.os }}
 
       - name: Install Wails v3 CLI
@@ -205,10 +201,8 @@ jobs:
       - name: Cache frontend build
         uses: actions/cache@v4
         with:
-          path: |
-            frontend/dist
-            frontend/bindings
-          key: frontend-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml', 'frontend/src/**', 'frontend/index.html', 'frontend/vite.config.*', 'frontend/tsconfig*.json', 'frontend/tailwind.config.*', '**/*.go', 'go.mod', 'go.sum') }}
+          path: frontend/dist
+          key: frontend-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml', 'frontend/src/**', 'frontend/index.html', 'frontend/vite.config.*', 'frontend/tsconfig*.json', 'frontend/tailwind.config.*') }}
 
       - name: Build
         run: task build
