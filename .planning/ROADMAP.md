@@ -1,167 +1,33 @@
-# Roadmap: Cmdex v2.0 Terminal Integration
+# Roadmap: Cmdex
 
-**Milestone:** v2.0
-**Name:** Terminal Integration
-**Goal:** Replace the static output pane with an xterm.js-based PTY terminal with full ANSI support, interactive input, and freeform command typing in a split-pane layout.
+## Milestones
 
----
+- ✅ **v2.1 Terminal Sessions** — Phases 21, 23, 24, 25 (shipped 2026-06-16) — [archive](milestones/v2.1-ROADMAP.md)
 
-## Phase 16: PTY Backend Foundation
-
-**Goal:** A persistent shell process runs in a Go-managed PTY with bidirectional I/O, resize support, and clean lifecycle management. The frontend can send keystrokes and receive output via Wails events.
-
-**Requirements:** PTY-01, PTY-02, PTY-03, PTY-04, PTY-05, PTY-06, POL-05
-
-**Success criteria:**
-1. Shell spawns in PTY on app startup (bash on macOS/Linux, powershell/cmd on Windows)
-2. Keystrokes sent from Go to PTY stdin produce correct shell echo in PTY output
-3. PTY output streams via Wails events with 16ms batching and 64KB max chunks per emit
-4. Calling `pty.Setsize` with new cols/rows changes shell dimensions (verify via `tput cols; tput lines`)
-5. App shutdown kills the shell process group — no orphaned bash/cmd processes
-6. Shell exit (user types `exit` or receives Ctrl+D) is detected and reported
-7. Shell auto-detection correctly picks bash on macOS/Linux and powershell/cmd on Windows
+## Phases
 
 <details>
-<summary>Plans (3 plans)</summary>
+<summary>✅ v2.1 Terminal Sessions (Phases 21, 23, 24, 25) — SHIPPED 2026-06-16</summary>
 
-- [x] 16-01-PLAN.md — TerminalService struct, service registration, event constants, Unix PTY lifecycle (creack/pty), Windows stubs, shell detection (Wave 1)
-- [x] 16-02-PLAN.md — PTY output streaming with 16ms batching, 64KB chunks, pty-output/pty-exit events, shell exit detection, auto-restart (Wave 2)
-- [x] 16-03-PLAN.md — Test suite for all 7 requirements, Windows go-winpty integration, package legitimacy gate (Wave 2)
+- [x] Phase 21: Backend Session Foundation (3/3 plans) — completed 2026-06-10
+- [x] Phase 23: Frontend Tabbed Terminal (3/3 plans) — completed 2026-06-10
+- [x] Phase 24: Session-Aware Execution (2/2 plans) — completed 2026-06-16
+- [x] Phase 25: Polish & Integration (4/4 plans) — completed 2026-06-16
 
-</details>
-
----
-
-## Phase 17: xterm.js Terminal and Split Pane Layout
-
-**Goal:** The current OutputPane is replaced by an xterm.js Terminal component in a split pane layout. The terminal renders PTY output, auto-fits to container size, and stays mounted across tab switches.
-
-**Requirements:** TERM-01, TERM-02, TERM-03, TERM-04, LAY-01, LAY-02, LAY-04
-
-**Success criteria:**
-1. xterm.js terminal renders in the bottom pane with ANSI color support (verify via `ls --color`)
-2. FitAddon resizes terminal when window or divider is resized — no scrollbar gaps
-3. WebglAddon activates on supported hardware, falls back gracefully to canvas renderer
-4. URLs in terminal output are underlined and clickable (WebLinksAddon)
-5. Layout is a vertical split: command editor on top, terminal on bottom, with drag-to-resize divider
-6. Switching command tabs does not unmount the Terminal component (CSS display toggle, not React unmount)
-7. The old OutputPane toggle behavior is fully removed from App.tsx
-
-**Plans:** 4 plans in 3 waves
-
-<details>
-<summary>Plans (Wave 1)</summary>
-
-- [x] 17-01-PLAN.md — Install xterm.js packages, create Terminal.tsx with FitAddon/WebglAddon/WebLinksAddon, add terminal CSS
+> Phase 22 (Database Persistence) was scoped out during Phase 25 D-02/D-03. PERS-01..PERS-04 deferred to v2. See archive for details.
 
 </details>
-
-<details>
-<summary>Plans (Wave 2)</summary>
-
-- [x] 17-02-PLAN.md — Remove OutputPane from App.tsx (state, imports, shortcuts), add split pane layout with useResizable divider + Terminal component
-- [x] 17-03-PLAN.md — Add ptyOutput/ptyExit to events.ts, regenerate Wails bindings, subscribe to pty-output/pty-exit events in Terminal.tsx
-
-</details>
-
-<details>
-<summary>Plans (Wave 3 — Gap Closure)</summary>
-
-- [ ] 17-04-PLAN.md — Route RunCommand output to xterm.js terminal via cmd-output event subscription (gap closure: UAT Test 5)
-
-</details>
-
----
-
-## Phase 18: Execution Integration and Interactivity
-
-**Goal:** Clicking Run writes the resolved command to the terminal. Users can type commands freely. Ctrl+C interrupts running processes. Working directory is respected.
-
-**Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-04, LAY-03
-
-**Success criteria:**
-1. Clicking Run on a saved command writes resolved command text + newline to PTY stdin via TerminalService.Write
-2. Command output appears in the terminal with full ANSI rendering (replaces static OutputPane)
-3. User can type any custom command directly in the terminal and execute it freely
-4. Ctrl+C sends SIGINT and interrupts the foreground process (verify with `sleep 30` then Ctrl+C)
-5. Shell starts in or changes to the command's resolved working directory when a command is loaded
-6. Clear button resets the terminal scrollback buffer
-
-<details>
-<summary>Plans (3 plans — 2 built + 1 gap closure)</summary>
-
-- [x] 18-01-PLAN.md — Replace RunCommand with PTY Write + cd sandwich working directory (EXEC-01, EXEC-04) (Wave 1)
-- [x] 18-02-PLAN.md — Keystroke forwarding via term.onData buffering, Ctrl+C interrupt, Clear button (EXEC-02, EXEC-03, LAY-03) (Wave 2)
-- [x] 18-03-PLAN.md — Gap closure: cd sandwich split, keystroke lag, clear button visibility (EXEC-02, EXEC-04, LAY-03) (Wave 3)
-
-</details>
-
----
-
-## Phase 19: Terminal Polish
-
-**Goal:** Terminal theme syncs with Cmdex themes, font matches app font, copy/paste works per-platform, and the terminal feels native. (SearchAddon deferred per D-09 to a future phase.)
-
-**Requirements:** POL-01, POL-02, POL-03, POL-04
-
-**Success criteria:**
-1. Switching Cmdex themes updates xterm terminal theme in real time with no flicker
-2. Terminal font family updates when user changes font in Settings
-3. Cmd+C / Ctrl+Shift+C copies selected text from terminal
-4. Cmd+V / Ctrl+Shift+V pastes clipboard text into terminal
-
-**Plans:** 1 plan in 1 wave
-
-<details>
-<summary>Plans (Wave 1)</summary>
-
-- [x] 19-01-PLAN.md — Theme sync via CSS var → ITheme hot-swap + font-change opacity transition; copy/paste via xterm.js built-in (no code changes)
-
-</details>
-
----
-
-## Phase 20: Terminal Copy Buttons
-
-**Goal:** Add copy buttons to the terminal toolbar — one to copy the last executed command text, one to copy selected terminal output.
-
-**Requirements:** CPY-01, CPY-02
-
-**Success criteria:**
-1. Copy Command button copies the full resolved command text (including `cd` working directory prefix) to clipboard
-2. Copy Output button copies currently selected terminal text to clipboard, or all visible output if nothing is selected
-3. Buttons are accessible in the terminal toolbar alongside Clear
-4. Clipboard write uses `navigator.clipboard.writeText` with a toast confirmation
-
-**Plans:** 1 plan in 1 wave
-
-<details>
-<summary>Plans (Wave 1)</summary>
-
-- [ ] 20-01-PLAN.md — Emit cmd-executing event from Go, add Copy Command + Copy Output buttons to terminal toolbar
-
-</details>
-
----
 
 ## Progress
 
-| Phase | Milestone | Requirements | Status |
-|-------|-----------|-------------|--------|
-| 1-5 | v1.0 Premium Polish | — | Shipped 2026-04-13 |
-| 6-7 | v1.1 Build Settings Window | — | Shipped |
-| 8-9 | v1.2 DB Migration Refactor | — | Shipped |
-| 10-13 | v1.3 Working Directory | 14 | Shipped 2026-04-23 |
-| 14 | v1.4 Editor Multi-Mount Refactor | — | Shipped 2026-04-23 |
-| 15 | v1.5 Cross-Platform Execution | — | Shipped 2026-05-04 |
-| 16 | 3/3 | Complete   | 2026-05-19 |
-| 17 | v2.0 Terminal Integration | 7 | Planned (gap closure: 17-04) |
-| 18 | 3/3 | Complete   | 2026-05-21 |
-| 19 | 1/1 | Complete   | 2026-05-22 |
-| 20 | 0/1 | Planned |
-
-**Execution order:** 16 -> 17 -> 18 -> 19 (serial — each phase depends on the prior)
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 21. Backend Session Foundation | v2.1 | 3/3 | Complete | 2026-06-10 |
+| 22. Database Persistence | v2.1 (scoped out) | 0/0 | Deferred | - |
+| 23. Frontend Tabbed Terminal | v2.1 | 3/3 | Complete | 2026-06-10 |
+| 24. Session-Aware Execution | v2.1 | 2/2 | Complete | 2026-06-16 |
+| 25. Polish & Integration | v2.1 | 4/4 | Complete | 2026-06-16 |
 
 ---
 
-*Last updated: 2026-05-18*
+*Last updated: 2026-06-16 after v2.1 milestone archive*

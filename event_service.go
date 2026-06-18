@@ -8,25 +8,17 @@ import (
 
 // EventNames holds all Wails event name constants, exposed to frontend via GetEventNames().
 type EventNames struct {
-	CmdExecuting          string `json:"cmdExecuting"`
 	OpenSettings          string `json:"openSettings"`
 	OpenShortcuts         string `json:"openShortcuts"`
 	SettingsChanged       string `json:"settingsChanged"`
 	SettingsWindowClosing string `json:"settingsWindowClosing"`
-	PtyOutput             string `json:"ptyOutput"`
-	PtyExit               string `json:"ptyExit"`
-	PtyCleared            string `json:"ptyCleared"`
 }
 
 var eventNames = EventNames{
-	CmdExecuting:          "cmd-executing",
 	OpenSettings:          "open-settings",
 	OpenShortcuts:         "open-shortcuts",
 	SettingsChanged:       "settings-changed",
 	SettingsWindowClosing: "settings-window-closing",
-	PtyOutput:             "pty-output",
-	PtyExit:               "pty-exit",
-	PtyCleared:            "pty-cleared",
 }
 
 // EventService exposes event name constants to the frontend.

@@ -9,6 +9,7 @@ import VariablePrompt from './components/VariablePrompt';
 import TerminalComponent, { type TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
+import TerminalTabBar from './components/TerminalTabBar';
 import CommandPalette from './components/CommandPalette';
 import WelcomeTab from './components/WelcomeTab';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
@@ -38,6 +39,7 @@ import {
     type VariablePrompt as VarPromptType,
     type VariablePreset,
     type TabDraft,
+    type SessionInfo,
     type SettingsPayload,
     type OSPathMap,
     type OSKey,
@@ -75,6 +77,7 @@ import {
     GetVariables,
     RunCommand,
 } from '../bindings/cmdex/executionservice';
+import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession } from '../bindings/cmdex/terminalservice';
 import i18n from './i18n';
 import {
     emptyDraft,
@@ -112,7 +115,6 @@ function App() {
     const allCommandsRef = useRef<Command[]>([]);
     const [selectedCommand, setSelectedCommand] = useState<Command | null>(null);
     const [modal, setModal] = useState<ModalState>({ type: 'none' });
-    const [isExecuting, setIsExecuting] = useState(false);
 
     const [serverVariables, setServerVariables] = useState<VarPromptType[]>([]);
     const [currentResolvedValues, setCurrentResolvedValues] = useState<Record<string, string>>({});
@@ -140,7 +142,7 @@ function App() {
     const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
     const pendingCloseTabIdRef = useRef<string | null>(null);
     const mainContentRef = useRef<HTMLDivElement>(null);
-    const terminalRef = useRef<TerminalHandle>(null);
+    const terminalRefs = useRef<Record<string, TerminalHandle>>({});
 
     const [theme, setTheme] = useState<string>('vscode-dark');
 
@@ -171,6 +173,10 @@ function App() {
         return localStorage.getItem(`${TERM_STORAGE_KEY}-collapsed`) === 'true';
     });
 
+    const [activeSessionId, setActiveSessionId] = useState<string>('');
+    const [sessions, setSessions] = useState<SessionInfo[]>([]);
+    const terminalOrderRef = useRef<string[]>([]);
+
     const collapseTerminal = useCallback(() => {
         setTerminalCollapsed(true);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'true');
@@ -179,6 +185,102 @@ function App() {
     const expandTerminal = useCallback(() => {
         setTerminalCollapsed(false);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
+    }, []);
+
+    // -- Session CRUD callbacks (Task 1) --
+
+    const createTerminalSession = useCallback(async () => {
+        try {
+            const info = await CreateSession();
+            if (info) {
+                // Mutate terminalOrderRef BEFORE the await so the re-render
+                // triggered by setSessions sees the new id. Refs are not
+                // reactive — mutating after the await would leave the ref
+                // missing the new id during the re-render, so the
+                // TerminalComponent for this id would never mount (regression
+                // from 0c5b41a when SetActiveSession became awaited).
+                terminalOrderRef.current = [...terminalOrderRef.current, info.id];
+                setSessions(prev => [...prev, info]);
+                try {
+                    await SetActiveSession(info.id);
+                    setActiveSessionId(info.id);
+                } catch (activeErr) {
+                    console.error('Failed to set active session after create:', activeErr);
+                    toast.error('Session created but could not be set as active.');
+                }
+            }
+        } catch (err) {
+            console.error('Failed to create terminal session:', err);
+            const msg = String(err);
+            if (msg.includes('max sessions reached')) {
+                toast.error(t('toast.maxSessionsReached', { limit: 10 }));
+            } else {
+                toast.error('Could not create session. Check that the terminal backend is running.');
+            }
+        }
+    }, [t]);
+
+    const closeTerminalSession = useCallback(async (id: string) => {
+        if (sessions.length <= 1) return; // D-02: last tab not closeable
+        // Snapshot sessions before the await so we don't read stale closure
+        // state if another action mutates `sessions` mid-flight.
+        const wasActive = activeSessionId === id;
+        const remaining = wasActive ? sessions.filter(s => s.id !== id) : [];
+        const next = remaining[0];
+        try {
+            await CloseSession(id);
+            setSessions(prev => prev.filter(s => s.id !== id));
+            terminalOrderRef.current = terminalOrderRef.current.filter(tid => tid !== id);
+            if (wasActive && next) {
+                try {
+                    await SetActiveSession(next.id);
+                    setActiveSessionId(next.id);
+                } catch (activeErr) {
+                    console.error('Failed to set next active session after close:', activeErr);
+                    toast.error('Session closed but could not switch active session.');
+                }
+            }
+        } catch (err) {
+            console.error('Failed to close terminal session:', err);
+        }
+    }, [sessions, activeSessionId]);
+
+    const renameTerminalSession = useCallback(async (id: string, name: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        try {
+            await RenameSession(id, trimmed);
+            setSessions(prev => prev.map(s =>
+                s.id === id ? { ...s, name: trimmed } : s
+            ));
+        } catch (err) {
+            console.error('Failed to rename session:', err);
+            toast.error('Could not rename session. Please try again.');
+        }
+    }, []);
+
+    const switchTerminalSession = useCallback(async (id: string) => {
+        try {
+            await SetActiveSession(id);
+            setActiveSessionId(id);
+        } catch (err) {
+            console.error('Failed to set active session:', err);
+            toast.error('Could not switch active session.');
+        }
+    }, []);
+
+    const handleReorderTerminalTabs = useCallback((reordered: SessionInfo[]) => {
+        setSessions(reordered);
+    }, []);
+
+    // Focus detection: returns true if keyboard focus is anywhere inside the
+    // terminal pane (including the xterm.js hidden textarea used for shell input).
+    // The xterm-helper-textarea is rendered as a descendant of the mount point,
+    // so the single .terminal-pane ancestor check covers all terminal focus states.
+    const isFocusInTerminalPane = useCallback((): boolean => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el) return false;
+        return !!el.closest?.('.terminal-pane');
     }, []);
 
     const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
@@ -234,7 +336,52 @@ function App() {
 
     useEffect(() => {
         initEventNames().then(() => setEventsInitialized(true));
+        // Load all sessions and active session on mount
+        ListSessions().then((list) => {
+            const loaded = ((list || []) as SessionInfo[]).filter(Boolean);
+            setSessions(loaded);
+            terminalOrderRef.current = loaded.map(s => s.id);
+            // Return loaded for the next .then(), and chain GetActiveSession
+            return GetActiveSession().then((info) => ({ loaded, info }));
+        }).then(({ loaded, info }) => {
+            if (info) {
+                setActiveSessionId(info.id);
+            } else if (loaded.length === 0) {
+                // No active session and no sessions loaded — create a default session
+                CreateSession().then((newInfo) => {
+                    if (newInfo) {
+                        setSessions([newInfo]);
+                        setActiveSessionId(newInfo.id);
+                        SetActiveSession(newInfo.id);
+                        terminalOrderRef.current = [newInfo.id];
+                    }
+                }).catch(() => {});
+            }
+        }).catch(() => {});
     }, []);
+
+    // Track per-session running status via pty-exit events
+    const sessionIdsKey = sessions.map(s => s.id).join(',');
+    useEffect(() => {
+        if (!eventsInitialized) return;
+        const cleanups: (() => void)[] = [];
+
+        const subscribeSession = (sessionId: string) => {
+            const ptyExitEvent = 'pty-exit:' + sessionId;
+            const cleanup = Events.On(ptyExitEvent, () => {
+                setSessions(prev => prev.map(s =>
+                    s.id === sessionId ? { ...s, running: false } : s
+                ));
+            });
+            cleanups.push(cleanup);
+            return cleanup;
+        };
+
+        sessions.forEach(s => subscribeSession(s.id));
+
+        return () => cleanups.forEach(fn => fn());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- use sessionIdsKey to avoid re-subscribing when only session.running changes
+    }, [sessionIdsKey, eventsInitialized]);
 
     useEffect(() => {
         applyTheme(theme);
@@ -861,7 +1008,6 @@ function App() {
         const execTabId = activeTabIdRef.current;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
-        setIsExecuting(true);
         expandTerminal();
 
         try {
@@ -871,14 +1017,13 @@ function App() {
                     toast.error(t('toast.commandFailed', { code: result.exitCode ?? -1 }));
                 }
             }
-        } catch (err) {
+        } catch {
             if (execTabId === activeTabIdRef.current) {
                 toast.error(t('toast.commandFailed', { code: -1 }));
             }
         } finally {
             executingTabIdRef.current = null;
             setExecutingTabIdState(null);
-            setIsExecuting(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, [t]);
@@ -1143,7 +1288,13 @@ function App() {
         },
 
         [`${cmdOrCtrl}+n`]: () => openNewCommandTab(),
-        [`${cmdOrCtrl}+t`]: () => openNewCommandTab(),
+        [`${cmdOrCtrl}+t`]: () => {
+            if (isFocusInTerminalPane()) {
+                createTerminalSession(); // D-01: new terminal session
+            } else {
+                openNewCommandTab(); // existing behavior: new command tab
+            }
+        },
 
         [`${cmdOrCtrl}+f`]: () => setPaletteOpen(true),
 
@@ -1152,24 +1303,65 @@ function App() {
         },
 
         'ctrl+w': () => {
-            if (activeTabId) closeTab(activeTabId);
+            if (isFocusInTerminalPane()) {
+                // D-02: close active terminal session, no-op if last tab
+                if (sessions.length > 1 && activeSessionId) {
+                    closeTerminalSession(activeSessionId);
+                }
+            } else {
+                if (activeTabId) closeTab(activeTabId);
+            }
         },
         'meta+w': () => {
-            if (activeTabId) closeTab(activeTabId);
+            if (isFocusInTerminalPane()) {
+                if (sessions.length > 1 && activeSessionId) {
+                    closeTerminalSession(activeSessionId);
+                }
+            } else {
+                if (activeTabId) closeTab(activeTabId);
+            }
         },
 
         'ctrl+tab': () => {
-            if (openTabs.length < 2) return;
-            const idx = openTabs.findIndex((t) => t.id === activeTabId);
-            const next = openTabs[(idx + 1) % openTabs.length];
-            if (next) handleSelectTab(next.id);
+            if (isFocusInTerminalPane()) {
+                // D-05: cycle terminal sessions forward, wrap around
+                if (sessions.length < 2) return;
+                const idx = sessions.findIndex(s => s.id === activeSessionId);
+                const next = sessions[(idx + 1) % sessions.length];
+                if (next) {
+                    switchTerminalSession(next.id);
+                    requestAnimationFrame(() => {
+                        terminalRefs.current[next.id]?.focus();
+                    });
+                }
+            } else {
+                // existing behavior: cycle command tabs forward
+                if (openTabs.length < 2) return;
+                const idx = openTabs.findIndex((t) => t.id === activeTabId);
+                const next = openTabs[(idx + 1) % openTabs.length];
+                if (next) handleSelectTab(next.id);
+            }
         },
 
         'ctrl+shift+tab': () => {
-            if (openTabs.length < 2) return;
-            const idx = openTabs.findIndex((t) => t.id === activeTabId);
-            const prev = openTabs[(idx - 1 + openTabs.length) % openTabs.length];
-            if (prev) handleSelectTab(prev.id);
+            if (isFocusInTerminalPane()) {
+                // D-05: cycle terminal sessions backward, wrap around
+                if (sessions.length < 2) return;
+                const idx = sessions.findIndex(s => s.id === activeSessionId);
+                const prev = sessions[(idx - 1 + sessions.length) % sessions.length];
+                if (prev) {
+                    switchTerminalSession(prev.id);
+                    requestAnimationFrame(() => {
+                        terminalRefs.current[prev.id]?.focus();
+                    });
+                }
+            } else {
+                // existing behavior: cycle command tabs backward
+                if (openTabs.length < 2) return;
+                const idx = openTabs.findIndex((t) => t.id === activeTabId);
+                const prev = openTabs[(idx - 1 + openTabs.length) % openTabs.length];
+                if (prev) handleSelectTab(prev.id);
+            }
         },
 
         'ctrl+`': () => {
@@ -1226,8 +1418,6 @@ function App() {
         }
         return map;
     }, [tabDrafts, openTabs]);
-
-    const isWelcome = !selectedCommand && !activeDraft;
 
     // Only the executing tab should receive isExecuting=true (prevents React.memo
     // bypass on all mounted CommandDetail instances when execution state changes).
@@ -1350,6 +1540,16 @@ function App() {
                             </div>
 
                             {!terminalCollapsed && (
+                                <>
+                                <TerminalTabBar
+                                    sessions={sessions}
+                                    activeSessionId={activeSessionId}
+                                    onSelectTab={switchTerminalSession}
+                                    onCloseTab={closeTerminalSession}
+                                    onReorderTabs={handleReorderTerminalTabs}
+                                    onCreateSession={createTerminalSession}
+                                    onRenameSession={renameTerminalSession}
+                                />
                                 <div
                                     className={`terminal-divider ${isDragging ? 'dragging' : ''}`}
                                     onMouseDown={handleTerminalResizeStart}
@@ -1365,7 +1565,10 @@ function App() {
                                     <button
                                         className="terminal-clear-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => terminalRef.current?.clear()}
+                                        onClick={() => {
+                                            const ref = terminalRefs.current[activeSessionId];
+                                            if (ref) ref.clear();
+                                        }}
                                         aria-label="Clear terminal"
                                         title="Clear terminal (Ctrl+L)"
                                     >
@@ -1375,7 +1578,8 @@ function App() {
                                         className="terminal-copy-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
                                         onClick={() => {
-                                            const output = terminalRef.current?.getLastOutput() || '';
+                                            const ref = terminalRefs.current[activeSessionId];
+                                            const output = ref?.getLastOutput() || '';
                                             if (output) {
                                                 navigator.clipboard.writeText(output).then(() => {
                                                     toast.success('Output copied');
@@ -1390,6 +1594,7 @@ function App() {
                                         {t('common.copyLastOutput')}
                                     </button>
                                 </div>
+                            </>
                             )}
 
                             <div
@@ -1399,12 +1604,36 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
-                                <TerminalComponent
-                                    ref={terminalRef}
-                                    isVisible={!terminalCollapsed}
-                                    theme={theme}
-                                    onShellExit={collapseTerminal}
-                                />
+                                {/* eslint-disable-next-line react-hooks/refs -- intentional: terminalOrderRef tracks stable iteration order; pair with setSessions() updates to trigger re-render */}
+                                {terminalOrderRef.current.map((id) => {
+                                    const session = sessions.find(s => s.id === id);
+                                    if (!session) return null;
+                                    return (
+                                        <TerminalComponent
+                                            key={id}
+                                            ref={(el) => {
+                                                if (el) {
+                                                    terminalRefs.current[id] = el;
+                                                } else {
+                                                    delete terminalRefs.current[id];
+                                                }
+                                            }}
+                                            isVisible={id === activeSessionId && !terminalCollapsed}
+                                            theme={theme}
+                                            sessionId={id}
+                                            onShellExit={() => {
+                                                // Mark session as stopped
+                                                setSessions(prev => prev.map(s =>
+                                                    s.id === id ? { ...s, running: false } : s
+                                                ));
+                                                // If this was the active session and it exited, collapse terminal
+                                                if (id === activeSessionId) {
+                                                    collapseTerminal();
+                                                }
+                                            }}
+                                        />
+                                    );
+                                })}
                                 {terminalCollapsed && (
                                     <button
                                         className="terminal-collapsed-rail"

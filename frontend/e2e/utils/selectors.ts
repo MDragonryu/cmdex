@@ -37,8 +37,6 @@ export const sel = {
   saveBarDiscard: '[data-testid="save-bar-discard"]',
 
   // Output / History
-  outputPane: '[data-testid="output-pane"]',
-  historyPane: '[data-testid="history-pane"]',
 
   // Command palette
   commandPalette: '[data-testid="command-palette"]',

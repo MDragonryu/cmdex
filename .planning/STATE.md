@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: milestone
-status: completed
-last_updated: "2026-05-22T08:44:45.502Z"
-last_activity: 2026-05-22 -- Phase 20 marked complete
+milestone: v2.1
+milestone_name: terminal-sessions
+status: "Milestone v2.1 shipped — PR #42"
+last_updated: "2026-06-16T15:30:00.000Z"
+last_activity: 2026-06-16
 progress:
-  total_phases: 5
-  completed_phases: 5
+  total_phases: 4
+  completed_phases: 4
   total_plans: 12
   completed_plans: 12
   percent: 100
@@ -17,23 +17,22 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-23)
+See: .planning/PROJECT.md (updated 2026-06-16)
 
-**Core value:** Users can organize commands by project context, execute with variables, and share
-**Current focus:** Phase 20 — terminal-copy-buttons
+**Core value:** Users can organize commands by project context, execute with variables, run long-running processes in dedicated terminal sessions alongside other commands, and share
+**Current focus:** Milestone v2.1 shipped; awaiting `/gsd-new-milestone` for v2.2+ planning
 
 ## Current Position
 
-Phase: 20 — COMPLETE
-Plan: 1 of 1
-Status: Phase 20 complete
-Last activity: 2026-05-22 -- Phase 20 marked complete
+Milestone: v2.1 — SHIPPED 2026-06-16
+Status: Milestone v2.1 shipped — PR #42
+Last activity: 2026-06-16
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 25
 - Total execution time: ~90 minutes
 - Timeline: 4 days
 
@@ -60,6 +59,10 @@ Last activity: 2026-05-22 -- Phase 20 marked complete
 | Phase 15-cross-platform-execution P02 | 161 | 3 tasks | 1 files |
 | Phase 15-cross-platform-execution P03 | 185 | 3 tasks | 2 files |
 | Phase 18-execution-integration-and-interactivity P02 | 6min | 2 tasks | 3 files |
+| Phase 25 P01 | 9min | 2 tasks | 5 files |
+| Phase 25 P04 | 1min | 1 tasks | 2 files |
+| Phase 25 P02 | 7min | 2 tasks | 5 files |
+| Phase 25 P03 | 4 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -83,6 +86,18 @@ Last activity: 2026-05-22 -- Phase 20 marked complete
 - ParseScriptBody now returns empty string for shebang-only inputs (no body present)
 - [Phase 18-execution-integration-and-interactivity]: forwardRef + useImperativeHandle pattern for exposing terminal.clear() to parent — Keeps clear logic encapsulated in terminal component; parent calls via terminalRef
 - [Phase 18-execution-integration-and-interactivity]: 50ms idle timeout for keystroke buffering — Mirrors the 16ms batching principle used in PTY readLoop
+- [Phase ?]: Build-tagged ptyBackend interface separates TerminalService from OS PTY layer; creack/pty on !windows, conpty stub on windows, darwin-only mockPtyBackend for orchestration tests — D-11/D-12 from Phase 25 CONTEXT. Refactor for testability — enables real orchestration tests against the mock on darwin and cross-compile verification on Windows.
+- [Phase 25]: getWorkingDir() mirrors execution_service.go:resolveWorkingDir (same log format, same OS-keyed read, same home fallback)
+
+Visual parallelism between the two cwd-resolution paths makes the contract recognizable; if execution_service.go's pattern is correct, getWorkingDir should follow it. — getWorkingDir() mirrors execution_service.go:resolveWorkingDir (same log format, same OS-keyed read, same home fallback)
+Visual parallelism between the two cwd-resolution paths makes the contract recognizable; if execution_service.go's pattern is correct, getWorkingDir should follow it.
+
+- [Phase 25]: TestTerminalService_StressCreateClose placed in new //go:build darwin file (terminal_service_stress_test.go) instead of terminal_service_test.go
+
+The plan said terminal_service_test.go but newTestTerminalServiceWithMock is itself darwin-tagged (Plan 25-01); referencing a build-tagged function from a non-tagged _test.go would break non-darwin test compilation. The test function and acceptance criteria are unchanged. — TestTerminalService_StressCreateClose placed in new //go:build darwin file (terminal_service_stress_test.go) instead of terminal_service_test.go
+The plan said terminal_service_test.go but newTestTerminalServiceWithMock is itself darwin-tagged (Plan 25-01); referencing a build-tagged function from a non-tagged _test.go would break non-darwin test compilation. The test function and acceptance criteria are unchanged.
+
+- [Phase 25]: MaxSessions = 10 guard added to CreateSession to prevent unbounded resource use
 
 ### Blockers/Concerns
 
@@ -129,4 +144,4 @@ Last activity: 2026-05-22 -- Phase 20 marked complete
 
 ---
 
-*Last updated: 2026-05-04*
+*Last updated: 2026-06-16*

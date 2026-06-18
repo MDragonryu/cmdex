@@ -5,13 +5,13 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Events } from '@wailsio/runtime';
-import { eventNames } from '../wails/events';
 import { Write, Resize, Start, Clear } from '../../bindings/cmdex/terminalservice';
 import { toast } from 'sonner';
 
 interface TerminalComponentProps {
   isVisible: boolean;
   theme: string;
+  sessionId: string;
   onShellExit?: () => void;
 }
 
@@ -19,15 +19,25 @@ export interface TerminalHandle {
     clear: () => void;
     getSelection: () => string;
     getLastOutput: () => string;
+    focus: () => void;
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ isVisible, theme, onShellExit }, ref) => {
+    ({ isVisible, theme, sessionId, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const isFirstMountRef = useRef(true);
   const backendAvailableRef = useRef(true);
+  const startCalledRef = useRef(false);
+  const sessionIdRef = useRef(sessionId);
+  const onShellExitRef = useRef(onShellExit);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+  useEffect(() => {
+    onShellExitRef.current = onShellExit;
+  }, [onShellExit]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -46,7 +56,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
           terminalRef.current?.clear();
           return;
         }
-        Clear().catch((err) => {
+        Clear(sessionIdRef.current).catch((err) => {
           console.error('clear failed:', err);
           if (backendAvailableRef.current) {
             backendAvailableRef.current = false;
@@ -150,6 +160,9 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
           return outputLines.join('\n');
       },
+      focus: () => {
+        terminalRef.current?.focus();
+      },
   }));
 
   useEffect(() => {
@@ -212,23 +225,17 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => webglAddon.dispose());
       term.loadAddon(webglAddon);
-    } catch {
-      // WebGL unavailable — canvas renderer used by default
+    } catch (webglErr) {
+      // WebGL unavailable (e.g. headless or no GPU) — fall back to canvas renderer
+      console.debug('WebGL addon not available:', webglErr);
     }
 
     if (containerRef.current) {
       term.open(containerRef.current);
       requestAnimationFrame(() => {
         fitAddon.fit();
-        Start(term.cols, term.rows).catch((err) => {
-          console.error('terminal start failed:', err);
-          if (backendAvailableRef.current) {
-            backendAvailableRef.current = false;
-            toast.error('Terminal start failed');
-          }
-        });
-        if (!skipTransition) {
-            containerRef.current!.style.opacity = '1';
+        if (!skipTransition && containerRef.current) {
+            containerRef.current.style.opacity = '1';
         }
       });
     }
@@ -237,7 +244,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const inputDisposable = term.onData((data) => {
       if (!backendAvailableRef.current) return;
-      Write(data).catch((err) => {
+      Write(sessionIdRef.current, data).catch((err) => {
         console.error('TerminalService.Write failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -247,7 +254,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (!backendAvailableRef.current) return;
-      Resize(cols, rows).catch((err) => {
+      Resize(sessionIdRef.current, cols, rows).catch((err) => {
         console.error('resize failed:', err);
         if (backendAvailableRef.current) {
           backendAvailableRef.current = false;
@@ -262,7 +269,43 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       observer.observe(containerRef.current);
     }
 
-    const cleanupOutput = Events.On(eventNames.ptyOutput, (event: { data: { data: string } }) => {
+    return () => {
+      inputDisposable.dispose();
+      resizeDisposable.dispose();
+      observer.disconnect();
+      if (terminalRef.current === term) {
+        term.dispose();
+        terminalRef.current = null;
+        fitAddonRef.current = null;
+      }
+      startCalledRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term || !sessionId) return;
+
+    if (!startCalledRef.current) {
+      startCalledRef.current = true;
+      requestAnimationFrame(() => {
+        const current = terminalRef.current;
+        if (!current) return;
+        Start(sessionId, current.cols, current.rows).catch((err) => {
+          console.error('terminal start failed:', err);
+          if (backendAvailableRef.current) {
+            backendAvailableRef.current = false;
+            toast.error('Terminal start failed');
+          }
+        });
+      });
+    }
+
+    const ptyOutputEvent = 'pty-output:' + sessionId;
+    const ptyExitEvent = 'pty-exit:' + sessionId;
+    const ptyClearedEvent = 'pty-cleared:' + sessionId;
+
+    const cleanupOutput = Events.On(ptyOutputEvent, (event: { data: { data: string } }) => {
       const output = event?.data?.data;
       if (output) {
         backendAvailableRef.current = true;
@@ -273,47 +316,26 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       }
     });
 
-    const cleanupExit = Events.On(eventNames.ptyExit, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
+    const cleanupExit = Events.On(ptyExitEvent, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
       const { exitCode, wasIntentional } = event?.data ?? {};
       if (process.env.NODE_ENV === 'development') {
         console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
       }
       if (wasIntentional) {
-        onShellExit?.();
+        onShellExitRef.current?.();
       }
     });
 
-    const cleanupCleared = Events.On(eventNames.ptyCleared, () => {
+    const cleanupCleared = Events.On(ptyClearedEvent, () => {
       terminalRef.current?.clear();
     });
 
-    const cleanupCmdExecuting = Events.On(eventNames.cmdExecuting, (event: { data: { data: string } }) => {
-      const cmdLine = event?.data?.data;
-      if (cmdLine && backendAvailableRef.current) {
-        Write(cmdLine).catch((err) => {
-          console.error('TerminalService.Write failed:', err);
-          if (backendAvailableRef.current) {
-            backendAvailableRef.current = false;
-          }
-        });
-      }
-    });
-
     return () => {
-      inputDisposable.dispose();
-      resizeDisposable.dispose();
-      observer.disconnect();
       cleanupOutput();
       cleanupExit();
       cleanupCleared();
-      cleanupCmdExecuting();
-      if (terminalRef.current === term) {
-        term.dispose();
-        terminalRef.current = null;
-        fitAddonRef.current = null;
-      }
     };
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     const term = terminalRef.current;

@@ -82,6 +82,14 @@ export interface TerminalInfo {
   name: string;
 }
 
+export interface SessionInfo {
+  id: string;
+  name: string;
+  running: boolean;
+  shellPath: string;
+  workingDir: string;
+}
+
 export interface ExecutionRecord {
   id: string;
   commandId: string;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -47,7 +48,32 @@ func testDBCreateCommand(t *testing.T, catID, cmdID, categoryName, cmdTitle, scr
 	}
 }
 
+// testWithTerminalSvc sets up a real TerminalService so RunCommand can dispatch
+// via terminalSvc.Write. Mirrors the save/restore pattern from
+// TestTerminalService_ServiceStartupAssignsTerminalSvc. The returned cleanup
+// func must be called (typically via defer) to restore the previous global
+// state and shut down the test service.
+func testWithTerminalSvc(t *testing.T) func() {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode (requires real PTY)")
+	}
+	prevTerminalSvc := terminalSvc
+	terminalSvc = nil
+	ts := &TerminalService{}
+	if err := ts.ServiceStartup(nil, application.ServiceOptions{}); err != nil {
+		terminalSvc = prevTerminalSvc
+		t.Skipf("TerminalService.ServiceStartup failed: %v", err)
+	}
+	return func() {
+		_ = ts.ServiceShutdown()
+		terminalSvc = prevTerminalSvc
+	}
+}
+
 func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
 	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
 	_, cleanup := testDBCreateCommand(t, "test-cat-wd-18", "test-cmd-wd-18", "TestWD", "Test Cmd WD", "echo hello", workingDirJSON)
 	defer cleanup()
@@ -66,6 +92,8 @@ func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
 }
 
 func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
 	initDB, err := NewDB()
 	if err != nil {
 		t.Skipf("cannot open test DB: %v", err)
@@ -95,6 +123,8 @@ func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 }
 
 func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
 	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
 	_, cleanup := testDBCreateCommand(t, "test-cat-ml-18", "test-cmd-ml-18", "TestML", "Test Cmd ML", "line1\nline2", workingDirJSON)
 	defer cleanup()
@@ -113,6 +143,8 @@ func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
 }
 
 func TestRunCommand_GetCommandError(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
 	initDB, err := NewDB()
 	if err != nil {
 		t.Skipf("cannot open test DB: %v", err)
@@ -135,6 +167,8 @@ func TestRunCommand_GetCommandError(t *testing.T) {
 }
 
 func TestRunCommand_NoHistoryPersistence(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
 	initDB, cleanup := testDBCreateCommand(t, "test-cat-nohist-18", "test-cmd-nohist-18", "TestNoHist", "Test Cmd NoHist", "echo hello", `{}`)
 	defer cleanup()
 
@@ -149,6 +183,69 @@ func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 	}
 	if len(records) > 0 {
 		t.Errorf("expected 0 execution records after RunCommand, got %d", len(records))
+	}
+}
+
+func TestRunCommand_NilTerminalSvc(t *testing.T) {
+	prevTerminalSvc := terminalSvc
+	terminalSvc = nil
+	defer func() { terminalSvc = prevTerminalSvc }()
+
+	_, cleanup := testDBCreateCommand(t, "test-cat-nilsvc-24", "test-cmd-nilsvc-24", "TestNilSvc", "Test Cmd NilSvc", "echo hi", `{}`)
+	defer cleanup()
+
+	svc := &ExecutionService{}
+	record := svc.RunCommand("test-cmd-nilsvc-24", nil)
+	if record.Error == "" {
+		t.Error("expected Error to be set when terminalSvc is nil, got empty")
+	}
+	if record.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", record.ExitCode)
+	}
+}
+
+func TestRunCommand_NoActiveSession(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
+	// testWithTerminalSvc creates a default session. To exercise the
+	// "no active" path, clear the activeSessionID on the service.
+	if terminalSvc == nil {
+		t.Skip("terminalSvc not initialized")
+	}
+	terminalSvc.mu.Lock()
+	terminalSvc.activeSessionID = ""
+	terminalSvc.mu.Unlock()
+
+	_, cleanup := testDBCreateCommand(t, "test-cat-noact-24", "test-cmd-noact-24", "TestNoAct", "Test Cmd NoAct", "echo hi", `{}`)
+	defer cleanup()
+
+	svc := &ExecutionService{}
+	record := svc.RunCommand("test-cmd-noact-24", nil)
+	if record.Error == "" {
+		t.Error("expected Error to be set when no active session, got empty")
+	}
+	if !strings.Contains(record.Error, "no active") {
+		t.Errorf("Error = %q, want it to contain 'no active'", record.Error)
+	}
+	if record.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", record.ExitCode)
+	}
+}
+
+func TestRunCommand_ExecutesOnActiveSession(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
+	// testWithTerminalSvc creates a default session and makes it active.
+	_, cleanup := testDBCreateCommand(t, "test-cat-exec-24", "test-cmd-exec-24", "TestExec", "Test Cmd Exec", "true", `{}`)
+	defer cleanup()
+
+	svc := &ExecutionService{}
+	record := svc.RunCommand("test-cmd-exec-24", nil)
+	if record.Error != "" {
+		t.Errorf("Error = %q, want empty (happy path)", record.Error)
+	}
+	if record.FinalCmd != "true\n" {
+		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, "true\n")
 	}
 }
 
@@ -174,15 +271,31 @@ func TestShellQuoteDir(t *testing.T) {
 }
 
 func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	prevTerminalSvc := terminalSvc
 	terminalSvc = nil
 	defer func() { terminalSvc = prevTerminalSvc }()
 
 	s := &TerminalService{}
 	_ = s.ServiceStartup(nil, application.ServiceOptions{})
-	defer s.Stop()
+	defer s.ServiceShutdown()
 
 	if terminalSvc == nil {
 		t.Error("terminalSvc should be non-nil after ServiceStartup, got nil")
+	}
+
+	s.mu.RLock()
+	count := len(s.sessions)
+	s.mu.RUnlock()
+
+	if count != 1 {
+		t.Errorf("expected 1 default session after ServiceStartup, got %d", count)
+	}
+
+	if s.sessionCounter != 1 {
+		t.Errorf("expected sessionCounter=1 after ServiceStartup, got %d", s.sessionCounter)
 	}
 }

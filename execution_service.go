@@ -108,9 +108,11 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
-// RunCommand resolves the command's template variables and emits the
-// resulting command line to the frontend via cmd-executing event.
-// The frontend writes it to the integrated terminal for execution.
+// RunCommand resolves the command's template variables and writes the
+// resulting command line directly to the active terminal session's PTY
+// via TerminalService.Write. Output streams back through the session's
+// pty-output event (handled by Terminal.tsx) and Ctrl+C interrupts are
+// handled by the PTY's foreground process group.
 func (s *ExecutionService) RunCommand(commandID string, variables map[string]string) ExecutionRecord {
 	cmd, err := db.GetCommand(commandID)
 	if err != nil {
@@ -133,10 +135,27 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		cmdLine = resolvedScript + "\n"
 	}
 
-	if wailsApp != nil {
-		wailsApp.Event.Emit(eventNames.CmdExecuting, map[string]interface{}{
-			"data": cmdLine,
-		})
+	if terminalSvc == nil {
+		return ExecutionRecord{
+			ID:       uuid.New().String(),
+			Error:    "terminal service not initialized",
+			ExitCode: -1,
+		}
+	}
+	session := terminalSvc.GetActiveSession()
+	if session == nil {
+		return ExecutionRecord{
+			ID:       uuid.New().String(),
+			Error:    "no active terminal session",
+			ExitCode: -1,
+		}
+	}
+	if err := terminalSvc.Write(session.ID, cmdLine); err != nil {
+		return ExecutionRecord{
+			ID:       uuid.New().String(),
+			Error:    err.Error(),
+			ExitCode: -1,
+		}
 	}
 
 	return ExecutionRecord{
@@ -145,36 +164,4 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		FinalCmd:   cmdLine,
 		ExecutedAt: time.Now(),
 	}
-}
-
-// RunInTerminal opens the command in the system terminal.
-func (s *ExecutionService) RunInTerminal(commandID string, variables map[string]string) error {
-	cmd, err := db.GetCommand(commandID)
-	if err != nil {
-		return err
-	}
-
-	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	workingDir := s.resolveWorkingDir(cmd)
-
-	settings, err := db.GetSettings()
-	if err != nil {
-		return fmt.Errorf("failed to get settings: %w", err)
-	}
-	return executor.OpenInTerminal(settings.Terminal, resolvedScript, workingDir)
-}
-
-// GetExecutionHistory returns all past execution records.
-func (s *ExecutionService) GetExecutionHistory() []ExecutionRecord {
-	records, err := db.GetExecutions()
-	if err != nil {
-		fmt.Println("Error getting executions:", err)
-		return []ExecutionRecord{}
-	}
-	return records
-}
-
-// ClearExecutionHistory deletes all execution history.
-func (s *ExecutionService) ClearExecutionHistory() error {
-	return db.ClearExecutions()
 }

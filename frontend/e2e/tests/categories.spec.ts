@@ -1,16 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-function seedCategory(cat: Record<string, unknown>) {
-  return {
-    id: cat.id || `cat-${Math.random().toString(36).slice(2, 8)}`,
-    name: '',
-    icon: '',
-    color: '#7c6aef',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    ...cat,
-  };
-}
+import '../utils/types';
 
 test.describe('Categories', () => {
   test('can create a new category', async ({ page }) => {
@@ -46,7 +35,7 @@ test.describe('Categories', () => {
   test('can edit a seeded category', async ({ page }) => {
     const catId = 'cat-edit-test';
     await page.addInitScript((id) => {
-      (window as any).__cmdexE2E_SEED__ = {
+      window.__cmdexE2E_SEED__ = {
         categories: [
           {
             id,
@@ -92,7 +81,7 @@ test.describe('Categories', () => {
   test('can delete a seeded category', async ({ page }) => {
     const catId = 'cat-del-test';
     await page.addInitScript((id) => {
-      (window as any).__cmdexE2E_SEED__ = {
+      window.__cmdexE2E_SEED__ = {
         categories: [
           {
             id,

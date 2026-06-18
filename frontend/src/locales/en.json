@@ -45,7 +45,6 @@
     "searchPresets": "Search presets...",
     "noPresetsFound": "No presets found.",
     "execute": "Execute",
-    "runInTerminal": "Run in Terminal",
     "running": "Running...",
     "manage": "Manage",
     "preview": "Preview",
@@ -164,29 +163,6 @@
     "deletePresetDescription": "Are you sure you want to delete this preset? This cannot be undone.",
     "deletePresetAction": "Delete"
   },
-  "historyPane": {
-    "title": "History",
-    "clearHistory": "Clear history",
-    "noExecutions": "No executions yet",
-    "justNow": "just now",
-    "minutesAgo": "{{count}}m ago",
-    "hoursAgo": "{{count}}h ago"
-  },
-  "outputPane": {
-    "title": "Output",
-    "exit": "exit {{code}}",
-    "streaming": "streaming…",
-    "showingLast": "showing last {{count}} lines",
-    "processExited": "Process exited with code {{code}}",
-    "emptyState": "Run a command or select a history entry to see output here.",
-    "expand": "Expand pane",
-    "collapse": "Collapse pane",
-    "toggleShortcut": "Toggle output",
-    "copyOutput": "Copy output",
-    "copyCommand": "Copy command",
-    "emptyResponse": "Empty Response",
-    "copyFailed": "Failed to copy to clipboard"
-  },
   "app": {
     "welcomeTitle": "Welcome to CmDex",
     "welcomeDescription": "Select a command from the sidebar or create a new one to get started.",
@@ -214,7 +190,8 @@
     "presetSaved": "Preset saved",
     "commandSuccess": "Command completed successfully",
     "commandFailed": "Command failed (exit {{code}})",
-    "saveBeforeExecute": "Save your changes before running the command."
+    "saveBeforeExecute": "Save your changes before running the command.",
+    "maxSessionsReached": "Maximum number of terminal sessions ({{limit}}) reached. Close a session to create a new one."
   },
   "settings": {
     "title": "Settings",
