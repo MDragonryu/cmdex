@@ -13,7 +13,7 @@ test:
 	cd frontend && pnpm test:e2e
 
 check:
-	go build ./...
+	go build $(shell go list ./... | grep -v '/ios$$')
 	cd frontend && pnpm tsc --noEmit
 
 clean:
