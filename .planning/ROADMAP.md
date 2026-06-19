@@ -2,9 +2,17 @@
 
 ## Milestones
 
+- ◆ **v2.2 Maintenance** — Phase 26 (in progress)
 - ✅ **v2.1 Terminal Sessions** — Phases 21, 23, 24, 25 (shipped 2026-06-16) — [archive](milestones/v2.1-ROADMAP.md)
 
 ## Phases
+
+### v2.2 Maintenance
+
+- [ ] Phase 26: Dependency Version Bump (1/1 plans) **Planned**
+
+**Plans:**
+- [ ] 26-01-PLAN.md — Bump Wails v3.0.0-alpha.74 → v3.0.0-alpha2.104 and Go 1.25.0 → 1.26.0; regenerate bindings; verify build + tests
 
 <details>
 <summary>✅ v2.1 Terminal Sessions (Phases 21, 23, 24, 25) — SHIPPED 2026-06-16</summary>
@@ -27,7 +35,8 @@
 | 23. Frontend Tabbed Terminal | v2.1 | 3/3 | Complete | 2026-06-10 |
 | 24. Session-Aware Execution | v2.1 | 2/2 | Complete | 2026-06-16 |
 | 25. Polish & Integration | v2.1 | 4/4 | Complete | 2026-06-16 |
+| 26. Dependency Version Bump | v2.2 | 1/1 | Planned | - |
 
 ---
 
-*Last updated: 2026-06-16 after v2.1 milestone archive*
+*Last updated: 2026-06-19 — Phase 26 added*

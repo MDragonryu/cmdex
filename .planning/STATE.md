@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.1
-milestone_name: terminal-sessions
-status: "Milestone v2.1 shipped — PR #42"
-last_updated: "2026-06-16T15:30:00.000Z"
-last_activity: 2026-06-16
+milestone: v2.2
+milestone_name: maintenance
+status: "Phase 26 planning complete — awaiting execution"
+last_updated: "2026-06-19T00:00:00.000Z"
+last_activity: 2026-06-19
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
-  total_plans: 12
+  total_plans: 13
   completed_plans: 12
-  percent: 100
+  percent: 92
 ---
 
 # Project State
