@@ -46,3 +46,5 @@ allure-results/
 # It is a best practice to keep these in a dedicated directory
 .auth/
 playwright/.auth/
+
+build/
