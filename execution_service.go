@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -108,19 +109,47 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
+// failedExecution builds an ExecutionRecord describing a failure to run.
+func failedExecution(commandID string, err error) ExecutionRecord {
+	return ExecutionRecord{
+		ID:        uuid.New().String(),
+		CommandID: commandID,
+		Error:     err.Error(),
+		ExitCode:  -1,
+	}
+}
+
 // RunCommand resolves the command's template variables and writes the
 // resulting command line directly to the active terminal session's PTY
 // via TerminalService.Write. Output streams back through the session's
 // pty-output event (handled by Terminal.tsx) and Ctrl+C interrupts are
 // handled by the PTY's foreground process group.
 func (s *ExecutionService) RunCommand(commandID string, variables map[string]string) ExecutionRecord {
+	if terminalSvc == nil {
+		return failedExecution(commandID, errors.New("terminal service not initialized"))
+	}
+	session := terminalSvc.GetActiveSession()
+	if session == nil {
+		return failedExecution(commandID, errors.New("no active terminal session"))
+	}
+	return s.RunCommandInSession(commandID, variables, session.ID)
+}
+
+// RunCommandInSession is RunCommand targeted at an explicit terminal session
+// rather than whichever session the main window has focused. The global quick
+// launcher uses it to run commands in its own dedicated session so its output
+// stays self-contained, while sharing this identical resolution path.
+func (s *ExecutionService) RunCommandInSession(commandID string, variables map[string]string, sessionID string) ExecutionRecord {
+	if terminalSvc == nil {
+		return failedExecution(commandID, errors.New("terminal service not initialized"))
+	}
+	if sessionID == "" {
+		return failedExecution(commandID, errors.New("no terminal session specified"))
+	}
+
 	cmd, err := db.GetCommand(commandID)
 	if err != nil {
-		return ExecutionRecord{
-			ID:       uuid.New().String(),
-			Error:    err.Error(),
-			ExitCode: -1,
-		}
+		return failedExecution(commandID, err)
 	}
 
 	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
@@ -135,33 +164,15 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		cmdLine = resolvedScript + "\n"
 	}
 
-	if terminalSvc == nil {
-		return ExecutionRecord{
-			ID:       uuid.New().String(),
-			Error:    "terminal service not initialized",
-			ExitCode: -1,
-		}
-	}
-	session := terminalSvc.GetActiveSession()
-	if session == nil {
-		return ExecutionRecord{
-			ID:       uuid.New().String(),
-			Error:    "no active terminal session",
-			ExitCode: -1,
-		}
-	}
-	if err := terminalSvc.Write(session.ID, cmdLine); err != nil {
-		return ExecutionRecord{
-			ID:       uuid.New().String(),
-			Error:    err.Error(),
-			ExitCode: -1,
-		}
+	if err := terminalSvc.Write(sessionID, cmdLine); err != nil {
+		return failedExecution(commandID, err)
 	}
 
 	return ExecutionRecord{
 		ID:         uuid.New().String(),
 		CommandID:  commandID,
 		FinalCmd:   cmdLine,
+		WorkingDir: workingDir,
 		ExecutedAt: time.Now(),
 	}
 }
