@@ -12,6 +12,10 @@ type EventNames struct {
 	OpenShortcuts         string `json:"openShortcuts"`
 	SettingsChanged       string `json:"settingsChanged"`
 	SettingsWindowClosing string `json:"settingsWindowClosing"`
+	// LauncherShown fires each time the quick launcher is revealed, so its UI
+	// can refocus the search field and select any existing query text.
+	LauncherShown  string `json:"launcherShown"`
+	LauncherHidden string `json:"launcherHidden"`
 }
 
 var eventNames = EventNames{
@@ -19,6 +23,8 @@ var eventNames = EventNames{
 	OpenShortcuts:         "open-shortcuts",
 	SettingsChanged:       "settings-changed",
 	SettingsWindowClosing: "settings-window-closing",
+	LauncherShown:         "launcher-shown",
+	LauncherHidden:        "launcher-hidden",
 }
 
 // EventService exposes event name constants to the frontend.

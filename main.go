@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"slices"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -10,8 +12,15 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// mainWindowName identifies the primary window so other services can find it.
+const mainWindowName = "main"
+
 func main() {
 	appService := &App{}
+
+	// Started by the launch-at-login entry: keep the main window hidden and let
+	// the global launcher be the only visible surface.
+	startHidden := slices.Contains(os.Args[1:], backgroundFlag)
 
 	app := application.New(application.Options{
 		Name: "CmDex",
@@ -23,6 +32,7 @@ func main() {
 			application.NewService(&SettingsService{}),
 			application.NewService(&ImportExportService{}),
 			application.NewService(&EventService{}),
+			application.NewService(&LauncherService{}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(assets),
@@ -64,10 +74,12 @@ func main() {
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:              "CmDex",
+		Name:               mainWindowName,
 		Width:              1200,
 		Height:             800,
 		MinWidth:           900,
 		MinHeight:          600,
+		Hidden:             startHidden,
 		UseApplicationMenu: true,
 		BackgroundColour:   application.NewRGBA(15, 15, 20, 255),
 	})
