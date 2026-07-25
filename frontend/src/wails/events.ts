@@ -6,6 +6,8 @@ export const eventNames = {
     settingsChanged: 'settings-changed',
     settingsWindowClosing: 'settings-window-closing',
     dataReset: 'data-reset',
+    launcherShown: 'launcher-shown',
+    launcherHidden: 'launcher-hidden',
 };
 
 export async function initEventNames(): Promise<void> {
@@ -17,6 +19,8 @@ export async function initEventNames(): Promise<void> {
         eventNames.settingsChanged = names.settingsChanged;
         eventNames.settingsWindowClosing = names.settingsWindowClosing;
         eventNames.dataReset = names.dataReset;
+        eventNames.launcherShown = names.launcherShown;
+        eventNames.launcherHidden = names.launcherHidden;
     } catch (err) {
         console.error('Failed to init event names:', err);
         toast.error('Failed to initialize events. Using fallback event names.');

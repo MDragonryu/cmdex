@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, lazy } from 'react'
 import {createRoot} from 'react-dom/client'
 import './i18n'
 import './style.css'
+import Launcher from './components/Launcher'
 import { GetSettings, SetSettings } from '../bindings/cmdex/settingsservice'
 import { ResetAllData } from '../bindings/cmdex/commandservice'
 import { THEMES, type CustomTheme } from './types'
@@ -15,11 +16,57 @@ const SettingsPage = lazy(() => import('./components/SettingsPage'))
 
 const container = document.getElementById('root')
 
-const isSettingsWindow = new URLSearchParams(window.location.search).get('window') === 'settings'
+const windowKind = new URLSearchParams(window.location.search).get('window')
+const isSettingsWindow = windowKind === 'settings'
+const isLauncherWindow = windowKind === 'launcher'
 
 const root = createRoot(container!)
 
-if (isSettingsWindow) {
+if (isLauncherWindow) {
+    // The global quick launcher window. It only needs theming applied — all of
+    // its behaviour lives in <Launcher />, which stays mounted for the lifetime
+    // of the app because the Go side shows/hides the window rather than
+    // creating and destroying it.
+    function LauncherWindow() {
+        const [theme, setTheme] = useState('vscode-dark')
+
+        const applySettings = useCallback((s: Awaited<ReturnType<typeof GetSettings>> | null) => {
+            if (!s) return
+            const t = s.theme || 'vscode-dark'
+            let custom: CustomTheme | undefined
+            if (s.customThemes && s.customThemes !== '[]') {
+                try {
+                    const parsed = JSON.parse(s.customThemes)
+                    if (Array.isArray(parsed)) custom = parsed.find((c: CustomTheme) => c.id === t)
+                } catch { /* ignore parse error */ }
+            }
+            setTheme(t)
+            applyTheme(t, custom?.colors ?? null)
+            applyDensity(s.density || 'comfortable')
+            applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
+        }, [])
+
+        useEffect(() => {
+            GetSettings().then(applySettings).catch(() => {})
+        }, [applySettings])
+
+        // Stay in sync when preferences change in the settings window.
+        useEffect(() => {
+            const cleanup = Events.On(eventNames.settingsChanged, () => {
+                GetSettings().then(applySettings).catch(() => {})
+            })
+            return () => cleanup()
+        }, [applySettings])
+
+        return <Launcher theme={theme} />
+    }
+
+    root.render(
+        <React.StrictMode>
+            <LauncherWindow />
+        </React.StrictMode>
+    )
+} else if (isSettingsWindow) {
     function SettingsWindow() {
         const [theme, setTheme] = useState('vscode-dark')
         const [density, setDensity] = useState('comfortable')
