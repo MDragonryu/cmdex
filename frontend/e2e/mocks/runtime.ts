@@ -408,6 +408,12 @@ export class CancellablePromise<T> extends Promise<T> {
       0,
     );
   },
+  // Deliver an event to the app as the real runtime would. Callers pass the
+  // full `WailsEvent` shape ({ name, data, sender }) because that is what
+  // window-to-window emits look like on the receiving side.
+  emit(eventName: string, data: any) {
+    Events.Emit(eventName, data);
+  },
 };
 
 // Read seed data injected via addInitScript before app initializes
