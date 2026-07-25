@@ -1155,7 +1155,11 @@ func (db *DB) GetSettings() (AppSettings, error) {
 		Theme: "vscode-dark", LastDarkTheme: "vscode-dark", LastLightTheme: "vscode-light",
 		CustomThemes: "[]", UIFont: "Inter", MonoFont: "JetBrains Mono", Density: "comfortable",
 		DefaultWorkingDir: &OSPathMap{},
+		LauncherShortcut:  DefaultLauncherShortcut,
 	}
+	launcherEnabled, launchAtLogin := true, false
+	defaults.LauncherEnabled = &launcherEnabled
+	defaults.LaunchAtLogin = &launchAtLogin
 	x, y, w, h := -1, -1, 640, 520
 	defaults.WindowX = &x
 	defaults.WindowY = &y
@@ -1220,6 +1224,15 @@ func (db *DB) SetSettings(s AppSettings) error {
 	if s.DefaultWorkingDir != nil {
 		copy := *s.DefaultWorkingDir
 		existing.DefaultWorkingDir = &copy
+	}
+	if s.LauncherEnabled != nil {
+		existing.LauncherEnabled = s.LauncherEnabled
+	}
+	if s.LauncherShortcut != "" {
+		existing.LauncherShortcut = s.LauncherShortcut
+	}
+	if s.LaunchAtLogin != nil {
+		existing.LaunchAtLogin = s.LaunchAtLogin
 	}
 	if s.WindowX != nil {
 		existing.WindowX = s.WindowX
