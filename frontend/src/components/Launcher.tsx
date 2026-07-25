@@ -195,27 +195,33 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
         e.preventDefault();
         const cmd = filtered[activeIndex];
         if (cmd) activate(cmd);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        // Escape backs out of the run panel first, then closes the launcher.
-        if (stage === 'running') resetToSearch();
-        else close();
       }
+      // Escape is handled by the window capture listener below, for every
+      // focus target rather than just this input.
     },
-    [filtered, activeIndex, activate, close, stage, resetToSearch],
+    [filtered, activeIndex, activate],
   );
 
-  // Escape anywhere in the window (for example while the terminal has focus).
+  // Escape anywhere in the window, including while the terminal has focus.
+  //
+  // This must run in the capture phase: xterm installs its own keydown handler
+  // and calls stopPropagation() for keys it consumes, Escape among them (it
+  // forwards \x1b to the PTY). A bubble-phase listener would therefore never
+  // see Escape once the terminal has focus. Capturing runs before xterm and
+  // stops the event there, so Escape means "go back" in the launcher rather
+  // than reaching the shell.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (stage === 'variables') return; // the dialog handles its own cancel
+      // Let the variable dialog handle its own cancel — don't swallow it here.
+      if (stage === 'variables') return;
       e.preventDefault();
+      e.stopPropagation();
       if (stage === 'running') resetToSearch();
       else close();
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [stage, resetToSearch, close]);
 
   const noop = useCallback(async () => {}, []);
