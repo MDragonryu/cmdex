@@ -75,6 +75,10 @@ type sessionState struct {
 	name       string
 	workingDir string
 	createdAt  time.Time
+	// internal marks a session owned by app chrome rather than by the user's
+	// terminal tabs. Internal sessions are excluded from ListSessions and
+	// never become the active session.
+	internal bool
 
 	mu        sync.Mutex
 	ptmx      ptyHandle
@@ -286,26 +290,44 @@ func (s *TerminalService) ServiceShutdown() error {
 
 // CreateSession creates a new terminal session with a UUID v4 ID and default name "Terminal N".
 func (s *TerminalService) CreateSession() (*SessionInfo, error) {
+	return s.createSession(false)
+}
+
+// CreateInternalSession creates a session owned by app chrome rather than by
+// the user's terminal tabs. It is hidden from ListSessions and never becomes
+// the active session.
+func (s *TerminalService) CreateInternalSession(name string) (*SessionInfo, error) {
+	return s.createSessionNamed(name, true)
+}
+
+func (s *TerminalService) createSession(internal bool) (*SessionInfo, error) {
+	return s.createSessionNamed("", internal)
+}
+
+func (s *TerminalService) createSessionNamed(name string, internal bool) (*SessionInfo, error) {
 	s.mu.Lock()
 	if n := len(s.sessions); n >= MaxSessions {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
 	}
 
-	s.sessionCounter++
-	name := fmt.Sprintf("Terminal %d", s.sessionCounter)
+	if name == "" {
+		s.sessionCounter++
+		name = fmt.Sprintf("Terminal %d", s.sessionCounter)
+	}
 	id := uuid.New().String()
 
 	ss := &sessionState{
 		id:         id,
 		name:       name,
+		internal:   internal,
 		workingDir: getWorkingDir(),
 		createdAt:  time.Now(),
 		lastSize:   ptyWinsize{Rows: defaultTerminalRows, Cols: defaultTerminalCols},
 	}
 
 	s.sessions[id] = ss
-	if s.activeSessionID == "" {
+	if !internal && s.activeSessionID == "" {
 		s.activeSessionID = id
 	}
 	s.mu.Unlock()
@@ -343,6 +365,9 @@ func (s *TerminalService) ListSessions() []*SessionInfo {
 
 	result := make([]*SessionInfo, 0, len(s.sessions))
 	for _, ss := range s.sessions {
+		if ss.internal {
+			continue
+		}
 		result = append(result, ss.info())
 	}
 	return result
@@ -363,6 +388,9 @@ func (s *TerminalService) CloseSession(id string) error {
 	if s.activeSessionID == id {
 		s.activeSessionID = ""
 		for otherID := range s.sessions {
+			if s.sessions[otherID].internal {
+				continue
+			}
 			s.activeSessionID = otherID
 			break
 		}
@@ -419,6 +447,9 @@ func (s *TerminalService) SetActiveSession(id string) error {
 
 	if _, ok := s.sessions[id]; !ok {
 		return fmt.Errorf("SetActiveSession: session not found: %s", id)
+	}
+	if s.sessions[id].internal {
+		return fmt.Errorf("SetActiveSession: session is internal: %s", id)
 	}
 
 	s.activeSessionID = id

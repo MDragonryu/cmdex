@@ -178,3 +178,47 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		ExecutedAt: time.Now(),
 	}
 }
+
+// RunCommandInSession is RunCommand targeted at an explicit terminal session
+// rather than whichever session is active. The global quick launcher uses it
+// so its output stays self-contained in its dedicated internal session.
+func (s *ExecutionService) RunCommandInSession(commandID string, variables map[string]string, sessionID string) ExecutionRecord {
+	if terminalSvc == nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: "terminal service not initialized", ExitCode: -1}
+	}
+	if sessionID == "" {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: "no terminal session specified", ExitCode: -1}
+	}
+
+	cmd, err := db.GetCommand(commandID)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+	ss, err := terminalSvc.resolveSession(sessionID)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+
+	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
+	resolvedScript = stripShebang(resolvedScript)
+	resolvedScript = strings.TrimRight(resolvedScript, "\n")
+	shellPath := ss.info().ShellPath
+	if shellPath == "" {
+		shellPath, _ = detectShell()
+	}
+	workingDir := ""
+	if s.hasExplicitWorkingDir(cmd) {
+		workingDir = s.resolveWorkingDir(cmd)
+	}
+	cmdLine := buildCommandLine(shellPath, resolvedScript, workingDir)
+	if err := terminalSvc.Write(sessionID, cmdLine); err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+
+	return ExecutionRecord{
+		ID:         uuid.New().String(),
+		CommandID:  commandID,
+		FinalCmd:   cmdLine,
+		ExecutedAt: time.Now(),
+	}
+}
