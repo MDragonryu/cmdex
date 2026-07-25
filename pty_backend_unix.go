@@ -22,8 +22,8 @@ type creackPtyBackend struct{}
 
 // Start spawns a shell attached to a new PTY, returning an io.ReadWriteCloser
 // handle for the PTY master.
-func (creackPtyBackend) Start(shellPath, shellFlag string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, rows, cols)
+func (creackPtyBackend) Start(shellPath, shellFlag, workingDir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, workingDir, rows, cols)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -55,11 +55,12 @@ func (h osFileHandle) Close() error                { return h.f.Close() }
 
 // ptyStart spawns the shell with a fresh PTY sized to rows/cols. The returned
 // *os.File is the PTY master; callers should Close it on shutdown.
-func ptyStart(shellPath, shellFlag string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+func ptyStart(shellPath, shellFlag, workingDir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
 	args := []string{shellFlag}
 	args = append(args, extraArgs...)
 	cmd := exec.Command(shellPath, args...)
-	cmd.Env = os.Environ()
+	cmd.Env = ptyEnv()
+	cmd.Dir = resolvePtyDir(workingDir)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {

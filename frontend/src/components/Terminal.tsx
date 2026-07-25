@@ -165,6 +165,24 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       },
   }));
 
+  // Every session's terminal stays mounted and inactive ones are hidden with
+  // `display: none`, where the container measures 0x0. Fitting then proposes
+  // garbage dimensions and resizes that session's PTY down to the addon
+  // minimum, so the shell rewraps its scrollback. Only ever fit a laid-out
+  // container.
+  const fitIfVisible = () => {
+    const container = containerRef.current;
+    if (!container || !fitAddonRef.current) return;
+    if (container.offsetParent === null) return;
+    const { width, height } = container.getBoundingClientRect();
+    if (width < 1 || height < 1) return;
+    try {
+      fitAddonRef.current.fit();
+    } catch (fitErr) {
+      console.debug('terminal fit skipped:', fitErr);
+    }
+  };
+
   useEffect(() => {
     const skipTransition = isFirstMountRef.current;
     if (isFirstMountRef.current) {
@@ -184,7 +202,10 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       fontFamily: 'JetBrains Mono, Fira Code, monospace',
       fontWeight: '400',
       scrollback: 5000,
-      convertEol: true,
+      // The PTY line discipline already translates LF to CRLF, so converting
+      // again would carriage-return on the bare LFs that full-screen programs
+      // (vim, less) emit for pure vertical movement.
+      convertEol: false,
       allowProposedApi: true,
       allowTransparency: false,
       theme: {
@@ -233,7 +254,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     if (containerRef.current) {
       term.open(containerRef.current);
       requestAnimationFrame(() => {
-        fitAddon.fit();
+        fitIfVisible();
         if (!skipTransition && containerRef.current) {
             containerRef.current.style.opacity = '1';
         }
@@ -263,7 +284,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     });
 
     const observer = new ResizeObserver(() => {
-      fitAddonRef.current?.fit();
+      fitIfVisible();
     });
     if (containerRef.current) {
       observer.observe(containerRef.current);
@@ -309,17 +330,14 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       const output = event?.data?.data;
       if (output) {
         backendAvailableRef.current = true;
-        if (process.env.NODE_ENV === 'development') {
-          console.log({output});
-        }
         terminalRef.current?.write(output);
       }
     });
 
     const cleanupExit = Events.On(ptyExitEvent, (event: { data: { exitCode: number; wasIntentional: boolean } }) => {
       const { exitCode, wasIntentional } = event?.data ?? {};
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
+      if (import.meta.env.DEV) {
+        console.debug(`Shell exited: code=${exitCode}, intentional=${wasIntentional}`);
       }
       if (wasIntentional) {
         onShellExitRef.current?.();
@@ -336,6 +354,25 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       cleanupCleared();
     };
   }, [sessionId]);
+
+  // Becoming visible is not a size change the ResizeObserver can act on until
+  // the browser has laid the container out, so re-fit on the next frame — and
+  // hand focus to the terminal so typing lands in the shell, not the editor.
+  // Skipped on first mount so the initially expanded panel doesn't steal focus.
+  const wasVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    const becameVisible = isVisible && !wasVisibleRef.current;
+    wasVisibleRef.current = isVisible;
+    if (!isVisible) return;
+
+    const frame = requestAnimationFrame(() => {
+      fitIfVisible();
+      if (becameVisible) {
+        terminalRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isVisible]);
 
   useEffect(() => {
     const term = terminalRef.current;

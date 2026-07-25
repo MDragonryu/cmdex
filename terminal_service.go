@@ -365,6 +365,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.intentionalStop = false
 
 	shellPath, shellFlag := detectShell()
+	workingDir := ss.workingDir
 
 	// CRITICAL: unlock before blocking operations to prevent deadlock.
 	ss.mu.Unlock()
@@ -376,9 +377,8 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		s.ptyBackend.Kill(oldCmd)
 	}
 	ss.readerWg.Wait()
-	ss.readerWg.Wait()
 
-	handle, cmd, err := s.ptyBackend.Start(shellPath, shellFlag, rows, cols)
+	handle, cmd, err := s.ptyBackend.Start(shellPath, shellFlag, workingDir, rows, cols)
 
 	ss.mu.Lock()
 	ss.starting = false
@@ -556,10 +556,14 @@ func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyH
 		}
 	}
 
+	// The shell is gone either way, so clear `running` before deciding what to
+	// do next — otherwise the auto-restart below is swallowed by Start's
+	// already-running fast path.
 	ss.mu.Lock()
 	intentional := ss.intentionalStop || exitCode == 0
 	cols := int(ss.lastSize.Cols)
 	rows := int(ss.lastSize.Rows)
+	ss.running = false
 	ss.mu.Unlock()
 
 	if wailsApp != nil {
@@ -570,9 +574,6 @@ func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyH
 	}
 
 	if intentional {
-		ss.mu.Lock()
-		ss.running = false
-		ss.mu.Unlock()
 		return
 	}
 
@@ -679,7 +680,10 @@ func (s *TerminalService) Clear(sessionId string) error {
 	return nil
 }
 
-// Start starts the PTY shell for the specified session.
+// Start starts the PTY shell for the specified session. It is idempotent: the
+// frontend calls it when a terminal mounts, but CreateSession has already
+// spawned the shell, so a running session is only resized to the caller's
+// dimensions rather than torn down and respawned.
 func (s *TerminalService) Start(sessionId string, cols, rows int) error {
 	ss, err := s.resolveSession(sessionId)
 	if err != nil {
@@ -691,6 +695,17 @@ func (s *TerminalService) Start(sessionId string, cols, rows int) error {
 
 	if ss.closed {
 		return fmt.Errorf("session closed: %s", sessionId)
+	}
+
+	if ss.running && ss.ptmx != nil {
+		if cols < 10 || rows < 3 {
+			return nil
+		}
+		if int(ss.lastSize.Cols) == cols && int(ss.lastSize.Rows) == rows {
+			return nil
+		}
+		ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
+		return s.ptyBackend.Resize(ss.ptmx, cols, rows)
 	}
 
 	return s.startSessionLocked(ss, cols, rows)
