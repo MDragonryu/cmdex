@@ -79,9 +79,14 @@ func (s *LauncherService) ServiceStartup(ctx context.Context, options applicatio
 	s.createWindowLocked()
 	s.mu.Unlock()
 
-	// A failure here only means the shortcut is unavailable; it must never stop
-	// the app from starting. The reason is surfaced through GetStatus.
-	s.ApplySettings()
+	// Registration must not happen inline here. ServiceStartup runs on the main
+	// thread before application.Run starts the platform run loop, and the macOS
+	// hotkey backend blocks on the main queue — so doing this synchronously
+	// would deadlock before the app ever appears.
+	//
+	// A failure only means the shortcut is unavailable; it must never stop the
+	// app from starting. The reason is surfaced through GetStatus.
+	go s.ApplySettings()
 	return nil
 }
 

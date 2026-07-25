@@ -5,15 +5,38 @@ package globalhotkey
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.design/x/hotkey"
 )
+
+// unregisterTimeout bounds how long Unregister waits for the platform call.
+// See runOffMainThread for why it can block, and Unregister for why giving up
+// is safe.
+const unregisterTimeout = 2 * time.Second
 
 // Manager owns at most one registered global hotkey at a time.
 type Manager struct {
 	mu   sync.Mutex
 	hk   *hotkey.Hotkey
 	stop chan struct{}
+}
+
+// runOffMainThread runs fn on a fresh goroutine and waits for its result.
+//
+// The macOS backend performs a dispatch_sync onto the main queue for both
+// register and unregister. Issuing that from the main thread — which is
+// exactly where Wails runs ServiceStartup and ServiceShutdown — is an
+// immediate self-deadlock that libdispatch aborts with SIGTRAP. A newly
+// spawned goroutine is never scheduled onto Wails' locked main thread, so the
+// dispatch_sync can complete there.
+//
+// The call blocks until the main run loop services its queue, so callers must
+// not invoke it from the main thread before application.Run has started.
+func runOffMainThread(fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	return <-done
 }
 
 // NewManager returns a Manager with no hotkey registered.
@@ -42,7 +65,7 @@ func (m *Manager) Register(c Chord, onTrigger func()) error {
 	m.unregisterLocked()
 
 	hk := hotkey.New(mods, key)
-	if err := hk.Register(); err != nil {
+	if err := runOffMainThread(hk.Register); err != nil {
 		return fmt.Errorf("register %s: %w", c, err)
 	}
 
@@ -79,9 +102,24 @@ func (m *Manager) unregisterLocked() {
 		close(m.stop)
 		m.stop = nil
 	}
-	if m.hk != nil {
-		_ = m.hk.Unregister()
-		m.hk = nil
+	hk := m.hk
+	m.hk = nil
+	if hk == nil {
+		return
+	}
+
+	// During shutdown the main run loop may already have stopped servicing its
+	// queue, leaving the platform call with nothing to complete against. Give
+	// up rather than hang the app on quit: the OS tears the hotkey down with
+	// the process anyway.
+	done := make(chan struct{})
+	go func() {
+		_ = hk.Unregister()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(unregisterTimeout):
 	}
 }
 
