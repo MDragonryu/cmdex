@@ -74,6 +74,63 @@ Supported shells: **bash**, **zsh**, **fish**, and **PowerShell**. Integration w
 
 ---
 
+## 3a. Global Quick Launcher
+
+The quick launcher is a Spotlight-style command palette that can be summoned
+from anywhere in the operating system, without CmDex being focused.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Global quick launcher | Enabled | Registers the system-wide shortcut |
+| Launcher shortcut | `Cmd+Shift+K` (macOS) / `Ctrl+Shift+K` (Windows/Linux) | Toggles the launcher |
+| Launch at login | Disabled | Starts CmDex in the background at login |
+
+The default avoids known OS bindings: Spotlight (`Cmd+Space`), the macOS emoji
+picker (`Ctrl+Cmd+Space`), and the Windows/Linux window menu (`Alt+Space`).
+
+### Behaviour
+
+- The shortcut **toggles** the launcher: press once to show, again to hide.
+- `↑`/`↓` move the selection, `Enter` runs the highlighted command, `Esc` closes.
+- Commands with `{{variables}}` open the same variable-entry dialog the main
+  window uses; commands without variables run immediately.
+- Commands run in the launcher's **own terminal session**, streaming into a
+  panel below the search field. That session is hidden from the main window's
+  terminal tabs. `Esc` returns from the output panel to the search field.
+- The launcher hides when it loses focus. Its window and terminal session are
+  created once and reused, so reopening is instant and previous output is
+  retained.
+
+### Accelerator format
+
+Accelerators are `+`-separated, case-insensitive tokens: `Cmd`/`Command`/`Super`,
+`Ctrl`, `Alt`/`Option`, `Shift`, and `CmdOrCtrl` (Command on macOS, Control
+elsewhere). The key may be `A`–`Z`, `0`–`9`, `F1`–`F20`, `Space`, `Enter`, `Tab`,
+`Esc`, `Delete`, or an arrow key. At least one modifier is required — a bare key
+would be unusable in every other application.
+
+### Platform support and limitations
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | Supported | **Requires Accessibility permission.** Grant CmDex access in System Settings › Privacy & Security › Accessibility, otherwise registration fails and Settings shows the reason. The launcher floats above full-screen apps and follows the active Space. |
+| Windows | Supported | Works in CGO-free builds. Appears above normal windows on the active virtual desktop. |
+| Linux (X11) | Supported | Uses `XGrabKey`. Some keys map to multiple modifier bits, so an exotic combination may not register. |
+| Linux (Wayland) | **Not supported** | The grab goes through XWayland, so it never fires while a native Wayland window has focus. Wayland exposes no portable global-shortcut protocol reachable from this Wails alpha. Settings shows a warning when a Wayland session is detected; run CmDex under X11 for a working shortcut. |
+| `CGO_ENABLED=0` Unix builds | Not supported | Registration returns an error and the app starts normally with the launcher disabled. |
+
+Additional known limitations:
+
+- **Multi-monitor:** the launcher always opens on the **primary** display. Wails
+  alpha.74 exposes no public cursor-position API, so the display the user is
+  actually looking at cannot be determined portably.
+- **Shortcut conflicts on macOS:** because the shortcut is delivered through a
+  CGEventTap, a combination already claimed by another application does not
+  produce a registration error — the most recently installed tap receives the
+  keystroke and consumes it.
+
+---
+
 ## 4. Language / Locale
 
 Cmdex supports internationalization via `react-i18next`.
@@ -127,6 +184,9 @@ The `data` column contains a JSON object with the following fields:
 | `windowY` | int | `-1` | Settings window Y position; `-1` = center |
 | `windowWidth` | int | `640` | Settings window width (min: 480) |
 | `windowHeight` | int | `520` | Settings window height (min: 400) |
+| `launcherEnabled` | bool | `true` | Register the system-wide quick launcher shortcut |
+| `launcherShortcut` | string | `"CmdOrCtrl+Shift+K"` | Global launcher accelerator |
+| `launchAtLogin` | bool | `false` | Start CmDex in the background at login |
 
 ### Persistence Behavior
 
@@ -289,6 +349,9 @@ This section consolidates all default values in one place. These originate from 
 | `defaultWorkingDir` | `{}` (empty OSPathMap; no OS-keyed paths) | `db.go` `GetSettings()` |
 | `windowX` | `-1` (center on screen) | `db.go` `GetSettings()` |
 | `windowY` | `-1` (center on screen) | `db.go` `GetSettings()` |
+| `launcherEnabled` | `true` | `db.go` `GetSettings()` |
+| `launcherShortcut` | `"CmdOrCtrl+Shift+K"` | `launcher_service.go` `DefaultLauncherShortcut` |
+| `launchAtLogin` | `false` | `db.go` `GetSettings()` |
 | `windowWidth` | `640` | `db.go` `GetSettings()` |
 | `windowHeight` | `520` | `db.go` `GetSettings()` |
 | `shellIntegration` | `nil` (unset → treated as enabled) | `models.go` `AppSettings` |

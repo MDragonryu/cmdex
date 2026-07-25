@@ -71,7 +71,7 @@ The `App` struct manages application lifecycle and the secondary settings window
 
 ### Services
 
-CmDex registers **seven** Wails v3 services in `main.go`:
+CmDex registers **eight** Wails v3 services in `main.go`:
 
 | Service | File | Responsibility |
 |---------|------|----------------|
@@ -82,6 +82,7 @@ CmDex registers **seven** Wails v3 services in `main.go`:
 | `ImportExportService` | `importexport_service.go` | Export/import commands as JSON, save theme templates |
 | `EventService` | `event_service.go` | Exposes event name constants so both sides use the same strings |
 | `TerminalService` | `terminal_service.go` | Multi-session PTY terminals, output capture, shell integration |
+| `LauncherService` | `launcher_service.go` | Global launcher window, shortcut registration, launch-at-login, and its internal terminal session |
 
 ### Database (`db.go`)
 
@@ -195,6 +196,7 @@ The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the 
 
 - **Main Window** (`/`, no query param) — lazily loads `<App />`
 - **Settings Window** (`/?window=settings`) — lazily loads `<SettingsPage />`, which persists preferences independently and emits `settings-changed` back to the main window
+- **Launcher Window** (`/?window=launcher`) — renders `<Launcher />` in a persistent, hidden-until-summoned window.
 
 ### Main App Structure (`App.tsx`)
 
@@ -221,6 +223,8 @@ The terminal panel is **shared, not per-tab**. It has its own session tabs, inde
 | `TerminalTabBar` | Terminal session tabs (create, rename, close, activate) |
 | `VariablePrompt` | Modal form for filling template variables before running |
 | `CommandPalette` | Quick-search overlay |
+| `Launcher` | Global quick-launcher UI rendered in its own window |
+| `LauncherSettings` | Launcher enable, shortcut, and launch-at-login settings |
 | `SettingsPage` / `SettingsDialog` | Theme, density, font, locale, working directory, shell integration |
 | `ResizablePanel` | Collapsible/resizable panes |
 | `WelcomeTab` | Empty-state tab (`'__welcome__'`) |
@@ -432,7 +436,7 @@ cmdex/
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── main.tsx            # Routes between main & settings window
+│   │   ├── main.tsx            # Routes between main, settings & launcher windows
 │   │   ├── App.tsx             # Central state, tabs, modals, terminal sessions
 │   │   ├── types.ts            # TypeScript interfaces (mirror of Go models)
 │   │   ├── i18n.ts             # i18n configuration
@@ -461,6 +465,7 @@ cmdex/
 |---|---|---|
 | `DB` struct | `db.go` | Wrapper over `database/sql` with the `modernc.org/sqlite` driver. Owns migrations (version 10), FTS5 triggers, WAL mode, and every CRUD query the services use. |
 | `TerminalService` + `sessionState` | `terminal_service.go` | Session registry keyed by ID, capped at `MaxSessions`. Each `sessionState` holds its PTY handle, process, shell path, last size, capture buffers, and nonce, guarded by a per-session mutex. |
+| `LauncherService` | `launcher_service.go` | Persistent always-on-top launcher window, global shortcut, launch-at-login, and dedicated internal terminal session. |
 | `ptyHandle` / `ptyProcess` | `pty_backend.go` | The only interfaces the terminal service is written against, so Unix, Windows, and mock backends are interchangeable. |
 | `Executor` struct | `executor.go` | Shell selection (`$SHELL -lc` / `cmd /C`) plus CEL default evaluation. Constructed once at startup; executes nothing. |
 | `Command` struct | `models.go` | Central domain entity: nullable title/description (`sql.NullString`), embedded `VariableDefinition[]`/`VariablePreset[]`, an `OSPathMap` working directory, and a `DisplayTitle()` that falls back to script content. |
