@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import LauncherSettings from './LauncherSettings';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Upload, Download, X, FolderOpen } from 'lucide-react';
 import { SetSettings, GetSettings, GetAvailableTerminals } from '../../bindings/cmdex/settingsservice';
@@ -641,6 +642,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
               {t('settings.workingDirectoryHint')}
             </p>
           </div>
+
+          <LauncherSettings />
 
           {onResetAllData && (
             <div className="border-t border-border pt-4 mt-2">

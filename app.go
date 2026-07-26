@@ -15,6 +15,7 @@ var (
 	executor    *Executor
 	wailsApp    *application.App
 	terminalSvc *TerminalService
+	launcherSvc *LauncherService
 )
 
 // App handles application lifecycle and settings window management.

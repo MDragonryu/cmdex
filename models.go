@@ -151,20 +151,25 @@ type TerminalInfo struct {
 
 // AppSettings stores user preferences
 type AppSettings struct {
-	Locale         string `json:"locale"`
-	Terminal       string `json:"terminal"`               // terminal ID; empty = auto-detect
-	Theme          string `json:"theme"`                  // active theme ID
-	LastDarkTheme  string `json:"lastDarkTheme"`          // last used dark theme
-	LastLightTheme string `json:"lastLightTheme"`         // last used light theme
-	CustomThemes   string `json:"customThemes"`           // JSON-encoded []CustomTheme; empty string = "[]"
-	UIFont         string `json:"uiFont"`                 // UI sans-serif font
-	MonoFont       string `json:"monoFont"`               // monospace font for editor
-	Density           string     `json:"density"`                // layout density: compact | comfortable | spacious
+	Locale            string     `json:"locale"`
+	Terminal          string     `json:"terminal"`                    // terminal ID; empty = auto-detect
+	Theme             string     `json:"theme"`                       // active theme ID
+	LastDarkTheme     string     `json:"lastDarkTheme"`               // last used dark theme
+	LastLightTheme    string     `json:"lastLightTheme"`              // last used light theme
+	CustomThemes      string     `json:"customThemes"`                // JSON-encoded []CustomTheme; empty string = "[]"
+	UIFont            string     `json:"uiFont"`                      // UI sans-serif font
+	MonoFont          string     `json:"monoFont"`                    // monospace font for editor
+	Density           string     `json:"density"`                     // layout density: compact | comfortable | spacious
 	DefaultWorkingDir *OSPathMap `json:"defaultWorkingDir,omitempty"` // nil = leave unchanged; non-nil empty map = clear.
-	WindowX           *int      `json:"windowX,omitempty"`      // settings window X position, nil = unset (center on open)
-	WindowY        *int   `json:"windowY,omitempty"`      // settings window Y position
-	WindowWidth    *int   `json:"windowWidth,omitempty"`  // settings window width, min 480
-	WindowHeight   *int   `json:"windowHeight,omitempty"` // settings window height, min 400
+
+	// Global quick launcher. The *bool fields use nil = "leave unchanged" so a
+	// partial SetSettings payload cannot silently switch a flag off.
+	LauncherEnabled  *bool  `json:"launcherEnabled,omitempty"` // register the system-wide shortcut
+	LauncherShortcut string `json:"launcherShortcut"`          // accelerator, e.g. "CmdOrCtrl+Shift+K"
+	LaunchAtLogin    *bool  `json:"launchAtLogin,omitempty"`   // start CmDex in the background at login
+
+	WindowX      *int `json:"windowX,omitempty"`      // settings window X position, nil = unset (center on open)
+	WindowY      *int `json:"windowY,omitempty"`      // settings window Y position
+	WindowWidth  *int `json:"windowWidth,omitempty"`  // settings window width, min 480
+	WindowHeight *int `json:"windowHeight,omitempty"` // settings window height, min 400
 }
-
-

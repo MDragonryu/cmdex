@@ -42,6 +42,7 @@ In `main.go`, six services are registered as `application.Service`:
 | `SettingsService` | `settings_service.go` | `../bindings/cmdex/settingsservice` |
 | `ImportExportService` | `importexport_service.go` | `../bindings/cmdex/importexportservice` |
 | `EventService` | `event_service.go` | `../bindings/cmdex/eventservice` |
+| `LauncherService` | `launcher_service.go` | `../bindings/cmdex/launcherservice` |
 
 Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates TypeScript bindings from exported methods into `frontend/bindings/cmdex/<servicename>/`. **Never hand-edit `frontend/bindings/`** — it's generated output.
 
@@ -119,6 +120,8 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 ## Gotchas
 
 - `wails3 generate build-assets` replaces the old `wails generate module` — if you don't see new methods, make sure you ran this.
+- **Global hotkeys must be registered off the main thread.** The macOS backend `dispatch_sync`s onto the main queue, and Wails runs `ServiceStartup`/`ServiceShutdown` on the main thread — calling it there is a self-deadlock that libdispatch aborts with `SIGTRAP`. `globalhotkey.Manager` spawns a goroutine for the platform call, and `LauncherService.ServiceStartup` fires `ApplySettings` asynchronously because the run loop is not yet servicing its queue at that point.
+- The launcher's terminal session is created via `CreateInternalSession` — internal sessions are hidden from `ListSessions` and can never become the active session, so they don't leak into the main window's terminal tabs.
 - `category_id` in commands is nullable — use `sql.NullString` for Go scanning; `NULL` means uncategorized.
 - `frontend/tsconfig.json` has `strict: false`. Don't assume strict-mode enforcement.
 - Mixed punctuation in frontend: `App.tsx` and most components use semicolons + single quotes; `ui/` components use double quotes + no semicolons. Match the file you're editing.

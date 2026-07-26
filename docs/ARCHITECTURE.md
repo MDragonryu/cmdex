@@ -75,6 +75,7 @@ CmDex registers six Wails v3 services in `main.go`:
 | `SettingsService` | `settings_service.go` | Read/write user preferences and detect available terminal emulators |
 | `ImportExportService` | `importexport_service.go` | Export commands to JSON, import commands from JSON, save theme templates |
 | `EventService` | `event_service.go` | Exposes event name constants to the frontend so both sides use the same strings |
+| `LauncherService` | `launcher_service.go` | Global quick launcher: always-on-top window, system-wide shortcut, dedicated terminal session, launch-at-login |
 
 ### Database (`db.go`)
 
@@ -119,6 +120,7 @@ The frontend is a single Vite bundle that renders two distinct UIs based on the 
 
 - **Main Window** (`/` or no query param) — Renders the primary `<App />` component.
 - **Settings Window** (`/?window=settings`) — Renders a dedicated `<SettingsWindow />` component that loads and persists preferences independently, then emits `settingsChanged` events back to the main window.
+- **Launcher Window** (`/?window=launcher`) — Renders `<Launcher />`, the global quick launcher. It stays mounted for the lifetime of the app because the Go side shows/hides the window rather than creating and destroying it.
 
 ### Main App Structure (`App.tsx`)
 
@@ -140,7 +142,9 @@ The frontend is a single Vite bundle that renders two distinct UIs based on the 
 | `OutputPane` | Streaming stdout/stderr display with ANSI handling |
 | `HistoryPane` | Past execution records for the selected command |
 | `VariablePrompt` | Modal form for filling template variables before execution |
-| `CommandPalette` | Quick-search overlay for commands |
+| `CommandPalette` | Quick-search overlay for commands (Cmd+P, in-app) |
+| `Launcher` | Global quick launcher UI rendered in its own window (`/?window=launcher`) |
+| `LauncherSettings` | Launcher enable/shortcut/launch-at-login settings section |
 | `SettingsPage` / `SettingsDialog` | Theme, density, font, terminal, and locale preferences |
 | `ResizablePanel` | Collapsible/resizeable side panes |
 
@@ -258,7 +262,47 @@ Command reordering (`handleReorderCommand`) updates local state immediately and 
 ### 7. Settings Migration Strategy
 Early settings were stored in `localStorage`. On startup, the app performs a one-time migration: if the database holds default values but `localStorage` has user-customized values, the localStorage values are promoted to the database and then cleared.
 
-### 8. Template Variable Syntax: `{{var}}`
+### 8. Global Launcher as a Third Window
+
+The quick launcher is a **third Wails window** (`/?window=launcher`) rather than
+a mode of the main window or a separate frontend build.
+
+The main window is the wrong host: it carries the sidebar, tab bar and editor,
+it can be closed or minimised, and making it frameless and always-on-top for
+launcher mode would visibly disrupt the user's editing session. A separate Vite
+entry point was rejected as well — it would duplicate the theming, event and
+binding bootstrap for no benefit, since Wails serves every window from the same
+bundle and routes on the `window` query parameter, exactly as the existing
+settings window already does.
+
+The window is created **once at startup** and then only shown and hidden. It is
+never destroyed, so React state, the loaded command list and the launcher's
+terminal scrollback all survive between invocations, and opening the launcher
+costs a window `Show` rather than a full webview boot.
+
+Global shortcut registration is not something Wails v3 alpha.74 provides — its
+`KeyBindings` only fire while a Wails window already has focus — so it lives in
+the `globalhotkey` package, a thin build-tag-partitioned wrapper over
+`golang.design/x/hotkey` that degrades to an error (never a panic) on builds
+that cannot support it.
+
+### 9. Launcher Runs in Its Own Terminal Session
+
+Execution from the launcher reuses `ExecutionService` via
+`RunCommandInSession`, which shares the variable-resolution and
+working-directory logic with the main window's `RunCommand`. The difference is
+the target: the launcher owns a dedicated **internal** terminal session.
+
+Internal sessions are excluded from `ListSessions`, never become the active
+session, and are rejected by `SetActiveSession`. Without that, the launcher's
+shell would appear as a tab in the main window and could capture the main
+window's "run in the active terminal" target.
+
+This keeps each launcher invocation transactional: summon it, run a command,
+read the output in the panel that expands below the search field, press `Esc`,
+and move on — without involving or disturbing the main window.
+
+### 10. Template Variable Syntax: `{{var}}`
 Commands use `{{variableName}}` for placeholders (not `${var}` or shell-style variables). This is distinct from shell syntax, making parsing reliable and substitution unambiguous before the script ever reaches a shell.
 
 ---
@@ -274,6 +318,9 @@ cmdex/
 ├── settings_service.go         # Read/write app settings, terminal detection
 ├── importexport_service.go     # JSON import/export for commands & themes
 ├── event_service.go            # Event name constants exposed to frontend
+├── launcher_service.go         # Global quick launcher window, shortcut, session
+├── autostart_*.go              # Launch-at-login, per platform
+├── globalhotkey/               # Platform-neutral global shortcut wrapper
 ├── db.go                       # SQLite schema, migrations, queries
 ├── executor.go                 # Subprocess execution, terminal integration, CEL eval
 ├── script.go                   # Shebang wrapping, {{var}} parsing & substitution

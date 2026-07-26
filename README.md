@@ -44,6 +44,7 @@ No build tools, no terminal setup — just download, install, and start saving c
 - **Smart Defaults** — Defaults support CEL expressions like `now()`, `env("HOME")`, and `date("2006-01-02")` so your commands are always up to date.
 - **Run Anywhere** — Execute commands inside CmDex with a built-in streaming output panel, or open them directly in your favorite terminal (Terminal, iTerm2, Warp, Alacritty, Kitty, Ghostty, and more).
 - **Lightning Search** — Find any command by title, description, tag, or script content in milliseconds (powered by SQLite FTS5).
+- **Global Quick Launcher** — Summon your commands from anywhere with `Cmd/Ctrl+Shift+K`, Spotlight-style. Search, hit Enter, and watch the output stream in a panel right below — then press Esc and get back to what you were doing. ([details & platform notes](docs/CONFIGURATION.md#3a-global-quick-launcher))
 - **Fully Local** — Everything lives on your machine in `~/.cmdex/cmdex.db`. No accounts, no cloud, no subscriptions.
 - **Dark & Polished** — A premium dark UI with glassmorphism, smooth animations, and a layout that feels right at home on any OS.
 
