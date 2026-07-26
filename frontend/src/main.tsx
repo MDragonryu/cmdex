@@ -33,6 +33,15 @@ if (isSettingsWindow) {
         const [windowWidth, setWindowWidth] = useState(640)
         const [windowHeight, setWindowHeight] = useState(520)
         const customThemesStrRef = useRef('[]')
+        // Mirrors `customThemes` so handlers that run before the next render
+        // (import -> onThemeChange in the same tick) still see the latest list.
+        const customThemesRef = useRef<CustomTheme[]>([])
+
+        const syncCustomThemes = useCallback((list: CustomTheme[]) => {
+            customThemesRef.current = list
+            customThemesStrRef.current = JSON.stringify(list)
+            setCustomThemes(list)
+        }, [])
 
         useEffect(() => {
             GetSettings().then(s => {
@@ -48,18 +57,22 @@ if (isSettingsWindow) {
                 if (s.windowY !== undefined) setWindowY(s.windowY)
                 if (s.windowWidth !== undefined) setWindowWidth(s.windowWidth)
                 if (s.windowHeight !== undefined) setWindowHeight(s.windowHeight)
-                applyTheme(t)
-                applyDensity(s.density || 'comfortable')
-                applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
+                // Parse custom themes before the first applyTheme so a saved custom
+                // theme paints with its own colors instead of the default palette.
+                let loadedCustomThemes: CustomTheme[] = []
                 if (s.customThemes && s.customThemes !== '[]') {
                     try {
                         const parsed = JSON.parse(s.customThemes)
-                        setCustomThemes(Array.isArray(parsed) ? parsed : [])
-                        customThemesStrRef.current = s.customThemes
+                        loadedCustomThemes = Array.isArray(parsed) ? parsed : []
+                        syncCustomThemes(loadedCustomThemes)
                     } catch { /* ignore parse error */ }
                 }
+                const loadedCustom = loadedCustomThemes.find(c => c.id === t)
+                applyTheme(t, loadedCustom?.colors ?? null)
+                applyDensity(s.density || 'comfortable')
+                applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
             }).catch(() => {})
-        }, [])
+        }, [syncCustomThemes])
 
         const persistSettings = useCallback(async (newSettings: Record<string, unknown>) => {
             try {
@@ -73,7 +86,7 @@ if (isSettingsWindow) {
 
         const handleThemeChange = useCallback((newTheme: string) => {
             const builtIn = THEMES.find(t => t.id === newTheme)
-            const custom = customThemes.find(t => t.id === newTheme)
+            const custom = customThemesRef.current.find(t => t.id === newTheme)
             const themeType = builtIn?.type ?? custom?.type ?? 'dark'
             applyTheme(newTheme, custom?.colors ?? null)
             if (themeType === 'dark') {
@@ -93,24 +106,22 @@ if (isSettingsWindow) {
                 windowX, windowY, windowWidth, windowHeight,
             }
             persistSettings(newSettings)
-        }, [customThemes, locale, terminal, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight])
+        }, [locale, terminal, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight])
 
         const handleImportTheme = useCallback((newTheme: CustomTheme) => {
-            const updated = [...customThemes, newTheme]
-            setCustomThemes(updated)
-            customThemesStrRef.current = JSON.stringify(updated)
+            const updated = [...customThemesRef.current, newTheme]
+            syncCustomThemes(updated)
             const newSettings = {
                 locale, terminal, theme, lastDarkTheme, lastLightTheme,
                 customThemes: customThemesStrRef.current, uiFont, monoFont, density,
                 windowX, windowY, windowWidth, windowHeight,
             }
             persistSettings(newSettings)
-        }, [customThemes, locale, terminal, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight])
+        }, [syncCustomThemes, locale, terminal, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight])
 
         const handleRemoveCustomTheme = useCallback((themeId: string) => {
-            const updated = customThemes.filter(t => t.id !== themeId)
-            setCustomThemes(updated)
-            customThemesStrRef.current = JSON.stringify(updated)
+            const updated = customThemesRef.current.filter(t => t.id !== themeId)
+            syncCustomThemes(updated)
             const newSettings = {
                 locale, terminal, theme, lastDarkTheme, lastLightTheme,
                 customThemes: customThemesStrRef.current, uiFont, monoFont, density,
@@ -120,7 +131,7 @@ if (isSettingsWindow) {
             if (theme === themeId) {
                 handleThemeChange('vscode-dark')
             }
-        }, [customThemes, locale, terminal, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight, handleThemeChange])
+        }, [syncCustomThemes, locale, terminal, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight, handleThemeChange])
 
         return (
             <SettingsPage
