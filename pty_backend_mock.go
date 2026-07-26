@@ -24,7 +24,7 @@ type mockPtyBackend struct{}
 // running "sleep 0.05" so that monitorExit's cmd.Wait() returns promptly
 // (the test does not need a long-lived shell to validate the orchestration
 // path).
-func (mockPtyBackend) Start(shellPath, shellFlag string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+func (mockPtyBackend) Start(shellPath, shellFlag, workingDir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
 	cmd := exec.Command("sleep", "0.05")
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
