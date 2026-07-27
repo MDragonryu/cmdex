@@ -270,6 +270,34 @@ func TestShellQuoteDir(t *testing.T) {
 	}
 }
 
+// TestToTerminalInput pins the regression that a command streamed into the
+// terminal sat at the prompt without running on Windows: the ConPTY input
+// parser submits a line on CR, the byte xterm.js sends for Enter, and ignores
+// a bare LF.
+func TestToTerminalInput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"single line", "echo hi\n", "echo hi\r"},
+		{"multiline", "line1\nline2\n", "line1\rline2\r"},
+		{"crlf collapses to one cr", "echo hi\r\n", "echo hi\r"},
+		{"mixed endings", "line1\r\nline2\n", "line1\rline2\r"},
+		{"already cr", "echo hi\r", "echo hi\r"},
+		{"no trailing newline", "echo hi", "echo hi"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toTerminalInput(tt.in)
+			if got != tt.want {
+				t.Errorf("toTerminalInput(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestPrefixWorkingDir pins the per-shell cd syntax. The POSIX form is not
 // portable: cmd.exe treats single quotes as literal characters, and Windows
 // PowerShell 5.1 rejects `&&` outright, so a command with a working directory
