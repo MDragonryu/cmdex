@@ -270,6 +270,50 @@ func TestShellQuoteDir(t *testing.T) {
 	}
 }
 
+// TestPrefixWorkingDir pins the per-shell cd syntax. The POSIX form is not
+// portable: cmd.exe treats single quotes as literal characters, and Windows
+// PowerShell 5.1 rejects `&&` outright, so a command with a working directory
+// would fail before running on a machine without pwsh installed.
+func TestPrefixWorkingDir(t *testing.T) {
+	tests := []struct {
+		name  string
+		shell string
+		dir   string
+		want  string
+	}{
+		{"bash", "/bin/bash", "/Users/test", "cd '/Users/test' && echo hi"},
+		{"zsh with quote in path", "/bin/zsh", "/Users/O'Brien", `cd '/Users/O'"'"'Brien' && echo hi`},
+		{
+			"powershell 7",
+			`C:\Program Files\PowerShell\7\pwsh.exe`,
+			`C:\Users\test`,
+			`Set-Location -LiteralPath 'C:\Users\test'; echo hi`,
+		},
+		{
+			"windows powershell 5.1",
+			`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			`C:\Program Files`,
+			`Set-Location -LiteralPath 'C:\Program Files'; echo hi`,
+		},
+		{
+			"powershell path with quote",
+			"pwsh",
+			`C:\Users\O'Brien`,
+			`Set-Location -LiteralPath 'C:\Users\O''Brien'; echo hi`,
+		},
+		{"cmd", `C:\Windows\System32\cmd.exe`, `D:\work`, `cd /d "D:\work" && echo hi`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := prefixWorkingDir(tt.shell, tt.dir, "echo hi")
+			if got != tt.want {
+				t.Errorf("prefixWorkingDir(%q, %q, ...) = %q, want %q", tt.shell, tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

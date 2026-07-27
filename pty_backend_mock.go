@@ -15,17 +15,18 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 )
 
 // mockPtyBackend is an in-memory ptyBackend for darwin tests.
 type mockPtyBackend struct{}
 
-// Start returns a mockPtyHandle pre-sized to rows/cols and a real *exec.Cmd
-// running "sleep 0.05" so that monitorExit's cmd.Wait() returns promptly
-// (the test does not need a long-lived shell to validate the orchestration
-// path).
-func (mockPtyBackend) Start(shellPath, shellFlag, workingDir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+// Start returns a mockPtyHandle pre-sized to rows/cols and a real process
+// running "sleep 0.05" so that monitorExit's Wait() returns promptly (the test
+// does not need a long-lived shell to validate the orchestration path).
+func (mockPtyBackend) Start(shellPath, shellFlag, workingDir string, rows, cols int) (ptyHandle, ptyProcess, error) {
 	cmd := exec.Command("sleep", "0.05")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
@@ -34,7 +35,7 @@ func (mockPtyBackend) Start(shellPath, shellFlag, workingDir string, rows, cols 
 		input:  &bytes.Buffer{},
 		cols:   cols,
 		rows:   rows,
-	}, cmd, nil
+	}, newExecProcess(cmd), nil
 }
 
 // Resize updates the recorded cols/rows on a mockPtyHandle.
@@ -48,14 +49,6 @@ func (mockPtyBackend) Resize(handle ptyHandle, cols, rows int) error {
 	h.cols = cols
 	h.rows = rows
 	return nil
-}
-
-// Kill terminates the sleep process spawned by Start, if any.
-func (mockPtyBackend) Kill(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
-	}
-	return cmd.Process.Kill()
 }
 
 // mockPtyHandle is an in-memory ptyHandle. Read drains the output buffer (or

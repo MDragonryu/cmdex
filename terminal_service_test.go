@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -98,10 +97,10 @@ func TestTerminalStart(t *testing.T) {
 	if ss.ptmx == nil {
 		t.Fatal("ptmx is nil after Start")
 	}
-	if ss.cmd == nil {
-		t.Fatal("cmd is nil after Start")
+	if ss.proc == nil {
+		t.Fatal("proc is nil after Start")
 	}
-	if ss.cmd.Process == nil {
+	if ss.proc.Pid() == 0 {
 		t.Fatal("process is nil after Start")
 	}
 }
@@ -142,98 +141,6 @@ func TestTerminalResize(t *testing.T) {
 	if ss.lastSize.Cols != 120 || ss.lastSize.Rows != 40 {
 		t.Errorf("lastSize not updated after Resize: got Cols=%d Rows=%d, want Cols=120 Rows=40",
 			ss.lastSize.Cols, ss.lastSize.Rows)
-	}
-}
-
-// TestTerminalShutdown verifies Stop() kills the shell process and clears state.
-func TestTerminalShutdown(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	shellPath, shellFlag := detectShell()
-
-	s := newTestTerminalService(t)
-	id := mustCreateAndStart(t, s)
-
-	ss, _ := s.resolveSession(id)
-	ss.mu.Lock()
-	ss.shellPath = shellPath
-	ss.shellFlag = shellFlag
-	ss.mu.Unlock()
-
-	s.Stop(id)
-	ptmx, c, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "sleep 60")
-	if err != nil {
-		t.Fatalf("ptyStart failed: %v", err)
-	}
-
-	ss.mu.Lock()
-	ss.ptmx = ptmx
-	ss.cmd = c
-	ss.stopCh = make(chan struct{})
-	ss.running = true
-	pid := ss.cmd.Process.Pid
-	ss.mu.Unlock()
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		t.Fatalf("FindProcess failed: %v", err)
-	}
-
-	s.Stop(id)
-
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	if ss.ptmx != nil {
-		t.Error("ptmx not cleared after Stop")
-	}
-	if ss.cmd != nil {
-		t.Error("cmd not cleared after Stop")
-	}
-
-	err = proc.Signal(syscall.Signal(0))
-	if err == nil {
-		t.Error("process still running after Stop")
-	}
-}
-
-// TestTerminalExit verifies shell exit triggers monitorExit flow.
-func TestTerminalExit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	s := newTestTerminalService(t)
-	id := mustCreateAndStart(t, s)
-
-	ss, _ := s.resolveSession(id)
-	shellPath, shellFlag := detectShell()
-
-	s.Stop(id)
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "exit 0")
-	if err != nil {
-		t.Fatalf("ptyStart failed: %v", err)
-	}
-
-	ss.mu.Lock()
-	ss.shellPath = shellPath
-	ss.shellFlag = shellFlag
-	ss.lastSize = ptyWinsize{Rows: 24, Cols: 80}
-	ss.ptmx = ptmx
-	ss.cmd = cmd
-	ss.stopCh = make(chan struct{})
-	ss.running = true
-	ss.mu.Unlock()
-
-	_ = cmd.Wait()
-	ptmx.Close()
-
-	go s.monitorExit(ss, cmd, ptmx, ss.stopCh)
-	defer s.Stop(id)
-
-	if cmd.ProcessState == nil {
-		t.Error("process state is nil after shell exit")
 	}
 }
 

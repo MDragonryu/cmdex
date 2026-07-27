@@ -80,6 +80,45 @@ func shellQuoteDir(dir string) string {
 	return `'` + escaped + `'`
 }
 
+// prefixWorkingDir prepends a directory change to script, written in the syntax
+// of shellPath. The POSIX form is wrong for both Windows shells: cmd.exe does
+// not understand single quotes and needs `cd /d` to cross drives, and Windows
+// PowerShell 5.1 has no `&&` operator at all — it would fail to parse the line
+// before running anything.
+func prefixWorkingDir(shellPath, dir, script string) string {
+	switch {
+	case isPowerShell(shellPath):
+		return fmt.Sprintf("Set-Location -LiteralPath '%s'; %s",
+			strings.ReplaceAll(dir, `'`, `''`), script)
+	case isCmdExe(shellPath):
+		return fmt.Sprintf(`cd /d "%s" && %s`, strings.ReplaceAll(dir, `"`, ``), script)
+	default:
+		return fmt.Sprintf("cd %s && %s", shellQuoteDir(dir), script)
+	}
+}
+
+// shellName reduces a shell path to a lowercase, extension-free base name so
+// `C:\Program Files\PowerShell\7\pwsh.exe` and "pwsh" compare equal. Both
+// separators are handled explicitly rather than via filepath.Base, because the
+// shell path being classified is a Windows path even when the code inspecting
+// it (a test, say) is running on unix.
+func shellName(shellPath string) string {
+	base := shellPath
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.TrimSuffix(strings.ToLower(base), ".exe")
+}
+
+func isPowerShell(shellPath string) bool {
+	name := shellName(shellPath)
+	return name == "pwsh" || name == "powershell"
+}
+
+func isCmdExe(shellPath string) bool {
+	return shellName(shellPath) == "cmd"
+}
+
 // terminalDef defines how to detect and launch a terminal emulator
 type terminalDef struct {
 	ID       string
