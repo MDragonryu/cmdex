@@ -58,7 +58,7 @@ Users can organize commands by project context, execute them with variable place
 - No frontend tests exist (manual verification only) — terminal UI features rely on UAT
 - `getWorkingDir()` and `execution_service.go:resolveWorkingDir` are parallel implementations of the same contract (no shared helper)
 - Mock PTY backend is darwin-only (`//go:build darwin`) — orchestration tests do not run on linux/windows CI yet
-- Windows conpty runtime not verified (stub implementation; cross-compile only)
+- Windows ConPTY backend not verified on real hardware — implemented in `pty_backend_windows.go`, but only cross-compile + `go vet` verified from darwin; no windows CI runner
 
 ## Next Milestone: TBD
 
@@ -66,7 +66,7 @@ The v2.1 Terminal Sessions milestone is complete. The next direction is not yet 
 
 Remaining technical work (from Phase 25 CHECKPOINT.md and the v2 deferred requirements):
 - **PERS-01..PERS-06** — session persistence across restarts, scrollback history, command history
-- **Windows conpty runtime** — replace the conpty stub in `pty_backend_windows.go` with a real implementation and add a `windows-latest` CI runner
+- **Windows ConPTY runtime** — the stub in `pty_backend_windows.go` has been replaced with a real implementation; still needs verification on real Windows hardware and a `windows-latest` CI runner that runs `go test`
 
 Use `/gsd-new-milestone` to plan the next milestone.
 
@@ -145,7 +145,7 @@ Use `/gsd-new-milestone` to plan the next milestone.
 - **Frontend:** React 19 + TypeScript + Vite
 - **Database:** SQLite via `modernc.org/sqlite` (pure Go, no CGo)
 - **PTY layer (unix):** `creack/pty`
-- **PTY layer (windows):** conpty stub (full implementation deferred)
+- **PTY layer (windows):** ConPTY via `golang.org/x/sys/windows` (`CreatePseudoConsole` + `CreateProcess` with `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`); requires Windows 10 1809+
 - **State:** Wails v3 service registration (one struct per service, registered as `application.Service`)
 - **Architecture:** Reactive props via callback factories keyed by tabId/sessionId
 

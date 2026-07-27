@@ -53,12 +53,12 @@ func TestPtyBackspaceEchoesEraseSequence(t *testing.T) {
 	shellPath, shellFlag := detectShell()
 	backend := newPtyBackend()
 
-	handle, cmd, err := backend.Start(shellPath, shellFlag, "", 24, 80)
+	handle, proc, err := backend.Start(shellPath, shellFlag, "", 24, 80)
 	if err != nil {
 		t.Skipf("cannot start PTY shell %s: %v", shellPath, err)
 	}
 	defer func() {
-		_ = backend.Kill(cmd)
+		_ = proc.Kill()
 		_ = handle.Close()
 	}()
 

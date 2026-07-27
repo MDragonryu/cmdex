@@ -159,7 +159,10 @@ func (s *ExecutionService) RunCommandInSession(commandID string, variables map[s
 
 	var cmdLine string
 	if s.hasExplicitWorkingDir(cmd) {
-		cmdLine = fmt.Sprintf("cd %s && %s\n", shellQuoteDir(workingDir), resolvedScript)
+		// Sessions are all spawned from detectShell, so it names the shell that
+		// will parse this line — the cd syntax has to match it.
+		shellPath, _ := detectShell()
+		cmdLine = prefixWorkingDir(shellPath, workingDir, resolvedScript) + "\n"
 	} else {
 		cmdLine = resolvedScript + "\n"
 	}
