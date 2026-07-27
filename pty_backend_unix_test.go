@@ -102,3 +102,45 @@ func TestPtyStartUsesWorkingDir(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, dir)
 	}
 }
+
+// TestPtyExecutesCarriageReturnTerminatedCommand is the regression test for a
+// command that streamed into the terminal but sat at the prompt until the user
+// pressed Enter themselves. Shells submit a line on CR — the byte xterm.js
+// sends for Enter — so a written command must be CR-terminated too. A bare LF
+// happens to work on unix because the line discipline translates it, which is
+// what hid the bug until it reached Windows, where the ConPTY input parser
+// does not. This test pins the unix half: the CR form must keep executing here.
+func TestPtyExecutesCarriageReturnTerminatedCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real login shell")
+	}
+
+	shellPath, shellFlag := detectShell()
+	backend := newPtyBackend()
+
+	handle, proc, err := backend.Start(shellPath, shellFlag, "", 24, 80)
+	if err != nil {
+		t.Skipf("cannot start PTY shell %s: %v", shellPath, err)
+	}
+	defer func() {
+		_ = proc.Kill()
+		_ = handle.Close()
+	}()
+
+	collector := &readCollector{}
+	collector.drain(handle)
+
+	// Let the login shell finish printing its prompt, then discard it.
+	collector.takeAfter(1500 * time.Millisecond)
+
+	if _, err := handle.Write([]byte(toTerminalInput("echo cmdex_ran\n"))); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	out := collector.takeAfter(1200 * time.Millisecond)
+
+	// The shell echoes the typed line back, so the sentinel appearing once
+	// only proves it reached the prompt. Executing it prints a second copy.
+	if strings.Count(out, "cmdex_ran") < 2 {
+		t.Errorf("command was echoed but never executed; PTY output was %q", out)
+	}
+}

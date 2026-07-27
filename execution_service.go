@@ -109,6 +109,20 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
+// toTerminalInput rewrites line endings as carriage returns, so that writing a
+// command to a PTY is byte-identical to a user pressing Enter on it — xterm.js
+// sends CR (0x0D) for the Enter key, and that is the byte shells submit a line
+// on. A bare LF only works by accident on unix, where the line discipline
+// translates it; the Windows ConPTY input parser does not, so an LF-terminated
+// command appears at the prompt but never runs.
+//
+// CRLF collapses to a single CR rather than two, so a script authored with
+// Windows line endings does not submit every line twice.
+func toTerminalInput(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\n", "\r")
+}
+
 // failedExecution builds an ExecutionRecord describing a failure to run.
 func failedExecution(commandID string, err error) ExecutionRecord {
 	return ExecutionRecord{
@@ -167,13 +181,16 @@ func (s *ExecutionService) RunCommandInSession(commandID string, variables map[s
 		cmdLine = resolvedScript + "\n"
 	}
 
-	if err := terminalSvc.Write(sessionID, cmdLine); err != nil {
+	if err := terminalSvc.Write(sessionID, toTerminalInput(cmdLine)); err != nil {
 		return failedExecution(commandID, err)
 	}
 
 	return ExecutionRecord{
-		ID:         uuid.New().String(),
-		CommandID:  commandID,
+		ID:        uuid.New().String(),
+		CommandID: commandID,
+		// The LF form is recorded, not the CR form actually written: FinalCmd is
+		// read by humans in the history pane, where stray CRs would render as
+		// one overwritten line.
 		FinalCmd:   cmdLine,
 		WorkingDir: workingDir,
 		ExecutedAt: time.Now(),
