@@ -122,15 +122,20 @@ if (isSettingsWindow) {
         const handleRemoveCustomTheme = useCallback((themeId: string) => {
             const updated = customThemesRef.current.filter(t => t.id !== themeId)
             syncCustomThemes(updated)
+            // Removing the selected theme must persist exactly once. Saving the
+            // deleted id here and then falling back in a second async save races:
+            // whichever RPC lands last decides, and the DB (or the main window)
+            // can end up pointing at a theme that no longer exists.
+            if (theme === themeId) {
+                handleThemeChange('vscode-dark')
+                return
+            }
             const newSettings = {
                 locale, terminal, theme, lastDarkTheme, lastLightTheme,
                 customThemes: customThemesStrRef.current, uiFont, monoFont, density,
                 windowX, windowY, windowWidth, windowHeight,
             }
             persistSettings(newSettings)
-            if (theme === themeId) {
-                handleThemeChange('vscode-dark')
-            }
         }, [syncCustomThemes, locale, terminal, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight, handleThemeChange])
 
         return (

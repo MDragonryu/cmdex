@@ -542,11 +542,14 @@ function App() {
 
                 let migratedCustomThemes: CustomTheme[] = [];
                 try {
-                    if (s.customThemes && s.customThemes !== '[]') {
-                        migratedCustomThemes = JSON.parse(s.customThemes);
-                    } else {
-                        const lsCustom = localStorage.getItem(CUSTOM_THEMES_KEY);
-                        if (lsCustom) migratedCustomThemes = JSON.parse(lsCustom);
+                    const rawCustomThemes = s.customThemes && s.customThemes !== '[]'
+                        ? s.customThemes
+                        : localStorage.getItem(CUSTOM_THEMES_KEY);
+                    if (rawCustomThemes) {
+                        const parsed = JSON.parse(rawCustomThemes);
+                        // A non-array payload must not reach state — the theme
+                        // effect calls .find() on it.
+                        if (Array.isArray(parsed)) migratedCustomThemes = parsed;
                     }
                 } catch { /* ignore parse errors */ }
 
