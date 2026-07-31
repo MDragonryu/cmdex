@@ -1,3 +1,5 @@
+import type { CustomTheme } from '../types';
+
 const CUSTOM_THEME_VAR_KEYS = [
   'background', 'foreground', 'card', 'card-foreground', 'popover', 'popover-foreground',
   'primary', 'primary-foreground', 'secondary', 'secondary-foreground', 'muted', 'muted-foreground',
@@ -18,6 +20,27 @@ export function applyTheme(themeId: string, customColors?: Record<string, string
       document.documentElement.style.setProperty(`--${key}`, value);
     });
   }
+}
+
+/**
+ * Parse the stored `customThemes` JSON blob.
+ *
+ * Settings hold this as a string, and a malformed or non-array value must not
+ * break theming — every caller gets an empty list instead.
+ */
+export function parseCustomThemes(raw?: string): CustomTheme[] {
+  if (!raw || raw === '[]') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The stored custom theme matching `themeId`, if the active theme is a custom one. */
+export function resolveActiveCustomTheme(raw: string | undefined, themeId: string): CustomTheme | undefined {
+  return parseCustomThemes(raw).find((c) => c.id === themeId);
 }
 
 export function applyDensity(density: string) {

@@ -9,7 +9,7 @@ import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
 import { toast } from 'sonner'
-import { applyTheme, applyDensity, applyFonts } from './lib/theme-apply'
+import { applyTheme, applyDensity, applyFonts, resolveActiveCustomTheme } from './lib/theme-apply'
 
 const App = lazy(() => import('./App'))
 const SettingsPage = lazy(() => import('./components/SettingsPage'))
@@ -33,13 +33,7 @@ if (isLauncherWindow) {
         const applySettings = useCallback((s: Awaited<ReturnType<typeof GetSettings>> | null) => {
             if (!s) return
             const t = s.theme || 'vscode-dark'
-            let custom: CustomTheme | undefined
-            if (s.customThemes && s.customThemes !== '[]') {
-                try {
-                    const parsed = JSON.parse(s.customThemes)
-                    if (Array.isArray(parsed)) custom = parsed.find((c: CustomTheme) => c.id === t)
-                } catch { /* ignore parse error */ }
-            }
+            const custom = resolveActiveCustomTheme(s.customThemes, t)
             setTheme(t)
             applyTheme(t, custom?.colors ?? null)
             applyDensity(s.density || 'comfortable')

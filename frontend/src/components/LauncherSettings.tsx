@@ -93,11 +93,15 @@ const LauncherSettings: React.FC = () => {
     }
   }, [persist, t]);
 
+  // On any failure the pending capture is discarded so displayShortcut falls
+  // back to status.shortcut — otherwise the field would keep advertising an
+  // accelerator that was never actually applied.
   const commitShortcut = useCallback(async (accelerator: string) => {
     try {
       await ValidateShortcut(accelerator);
     } catch (err) {
       toast.error(String(err));
+      setPendingShortcut('');
       return;
     }
     try {
@@ -107,6 +111,7 @@ const LauncherSettings: React.FC = () => {
       }
     } catch (err) {
       toast.error(t('settings.launcherSaveFailed', { message: String(err) }));
+      setPendingShortcut('');
     }
   }, [persist, t]);
 

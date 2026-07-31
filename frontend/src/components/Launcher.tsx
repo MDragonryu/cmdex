@@ -226,6 +226,18 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
 
   const noop = useCallback(async () => {}, []);
 
+  /** Re-read the presets for a command after one was added, renamed or removed. */
+  const refreshPresets = useCallback(async (cmd: Command) => {
+    const presets = await GetPresets(cmd.id);
+    setPendingCommand({ ...cmd, presets: presets || [] });
+  }, []);
+
+  // Screen readers follow the highlighted row through aria-activedescendant:
+  // focus stays in the search field while the arrow keys move the selection.
+  const showResults = stage !== 'running';
+  const activeOptionId =
+    showResults && filtered[activeIndex] ? `launcher-option-${activeIndex}` : undefined;
+
   return (
     <div className="launcher-root">
       <div className="launcher-search">
@@ -239,6 +251,12 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
           onKeyDown={handleKeyDown}
           autoComplete="off"
           spellCheck={false}
+          role="combobox"
+          aria-label="Search CmDex commands"
+          aria-controls="launcher-results"
+          aria-expanded={showResults}
+          aria-autocomplete="list"
+          aria-activedescendant={activeOptionId}
         />
         {query && (
           <button
@@ -274,7 +292,15 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
           </div>
         </div>
       ) : (
-        <div className="launcher-results" ref={listRef}>
+        <div
+          className="launcher-results"
+          ref={listRef}
+          id="launcher-results"
+          // Only a listbox once it actually holds options — the empty state is
+          // a message, not a selectable row.
+          role={filtered.length > 0 ? 'listbox' : undefined}
+          aria-label="Command results"
+        >
           {filtered.length === 0 ? (
             <div className="launcher-empty">
               {commands.length === 0
@@ -288,7 +314,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
               return (
                 <div
                   key={cmd.id}
+                  id={`launcher-option-${i}`}
                   data-idx={i}
+                  role="option"
+                  aria-selected={isActive}
                   className={`launcher-item${isActive ? ' active' : ''}`}
                   onMouseEnter={() => setActiveIndex(i)}
                   onClick={() => activate(cmd)}
@@ -343,21 +372,33 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
           onCancel={resetToSearch}
           onSavePreset={async (name, values) => {
             if (!pendingCommand) return;
-            await SavePreset(pendingCommand.id, name, values);
-            const presets = await GetPresets(pendingCommand.id);
-            setPendingCommand({ ...pendingCommand, presets: presets || [] });
+            try {
+              await SavePreset(pendingCommand.id, name, values);
+              await refreshPresets(pendingCommand);
+            } catch (err) {
+              toast.error('Failed to save preset: ' + String(err));
+              console.error('launcher: save preset failed', err);
+            }
           }}
           onUpdatePreset={async (presetId, name, values) => {
             if (!pendingCommand) return;
-            await UpdatePreset(pendingCommand.id, presetId, name, values);
-            const presets = await GetPresets(pendingCommand.id);
-            setPendingCommand({ ...pendingCommand, presets: presets || [] });
+            try {
+              await UpdatePreset(pendingCommand.id, presetId, name, values);
+              await refreshPresets(pendingCommand);
+            } catch (err) {
+              toast.error('Failed to update preset: ' + String(err));
+              console.error('launcher: update preset failed', err);
+            }
           }}
           onDeletePreset={async (presetId) => {
             if (!pendingCommand) return;
-            await DeletePreset(pendingCommand.id, presetId);
-            const presets = await GetPresets(pendingCommand.id);
-            setPendingCommand({ ...pendingCommand, presets: presets || [] });
+            try {
+              await DeletePreset(pendingCommand.id, presetId);
+              await refreshPresets(pendingCommand);
+            } catch (err) {
+              toast.error('Failed to delete preset: ' + String(err));
+              console.error('launcher: delete preset failed', err);
+            }
           }}
           onPresetChange={noop}
         />

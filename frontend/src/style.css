@@ -3290,6 +3290,7 @@ textarea.detail-description-textarea:focus {
 /* Visible keyboard focus for launcher controls. */
 .launcher-clear:focus-visible,
 .launcher-run-back:focus-visible,
+.launcher-input:focus-visible,
 .launcher-open-app:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
