@@ -52,6 +52,7 @@ In `main.go`, eight services are registered as `application.Service`:
 | Service struct | File | Frontend binding import |
 |---|---|---|
 | `App` | `app.go` | `../bindings/cmdex/app` |
+| `TerminalService` | `terminal_service.go` | `../bindings/cmdex/terminalservice` |
 | `CommandService` | `command_service.go` | `../bindings/cmdex/commandservice` |
 | `ExecutionService` | `execution_service.go` | `../bindings/cmdex/executionservice` |
 | `SettingsService` | `settings_service.go` | `../bindings/cmdex/settingsservice` |
