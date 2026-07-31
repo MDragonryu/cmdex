@@ -306,9 +306,20 @@ func (s *TerminalService) createSession(internal bool) (*SessionInfo, error) {
 
 func (s *TerminalService) createSessionNamed(name string, internal bool) (*SessionInfo, error) {
 	s.mu.Lock()
-	if n := len(s.sessions); n >= MaxSessions {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
+	// Only user-visible sessions count against the limit. The launcher's hidden
+	// session would otherwise cost the user a terminal tab, or fail to start at
+	// all once MaxSessions tabs are open.
+	if !internal {
+		visible := 0
+		for _, existing := range s.sessions {
+			if !existing.internal {
+				visible++
+			}
+		}
+		if visible >= MaxSessions {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
+		}
 	}
 
 	if name == "" {

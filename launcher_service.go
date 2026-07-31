@@ -365,10 +365,16 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 // SetLaunchAtLogin installs or removes the platform login item and persists the
 // preference.
 func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
+	previous := autostartEnabled()
 	if err := setAutostart(enabled); err != nil {
 		return err
 	}
 	if err := db.SetSettings(AppSettings{LaunchAtLogin: &enabled}); err != nil {
+		// The login item is already installed or removed at this point. Undo it
+		// so the OS state cannot disagree with the persisted preference.
+		if rollbackErr := setAutostart(previous); rollbackErr != nil {
+			return fmt.Errorf("persist launch-at-login: %v; restore login item: %w", err, rollbackErr)
+		}
 		return fmt.Errorf("persist launch-at-login: %w", err)
 	}
 
