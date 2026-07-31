@@ -6,6 +6,7 @@
 export interface CmdexE2ESeed {
     categories?: Array<Record<string, unknown>>;
     commands?: Array<Record<string, unknown>>;
+    presets?: Record<string, Array<Record<string, unknown>>>;
     settings?: Record<string, unknown>;
 }
 
@@ -18,6 +19,7 @@ declare global {
             reset(): void;
             seed(data: CmdexE2ESeed): void;
             emit(eventName: string, data: unknown): void;
+            hasListener(eventName: string): boolean;
         };
     }
 }

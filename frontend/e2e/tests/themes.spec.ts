@@ -23,6 +23,26 @@ function rootVar(page: Page, name: string): Promise<string> {
   );
 }
 
+// The settings window emits `settings-changed` after a theme change; the
+// payload arrives wrapped in a WailsEvent, so the colors sit under `data`.
+// The app subscribes only once its async event-name lookup resolves, so wait
+// for the listener — emitting earlier drops the event and the assertions below
+// would then be waiting for something that can never arrive.
+async function emitSettingsChanged(page: Page, data: Record<string, unknown>) {
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__cmdexE2E?.hasListener('settings-changed') ?? false),
+    )
+    .toBe(true);
+  await page.evaluate((payload) => {
+    window.__cmdexE2E?.emit('settings-changed', {
+      name: 'settings-changed',
+      data: payload,
+      sender: 'e2e',
+    });
+  }, data);
+}
+
 test.describe('Custom themes', () => {
   test('applies the saved custom theme colors on load', async ({ page }) => {
     await page.addInitScript((theme) => {
@@ -47,15 +67,10 @@ test.describe('Custom themes', () => {
     await expect(page.locator('.sidebar')).toBeVisible();
     expect(await rootVar(page, '--background')).toBe('');
 
-    // The settings window emits this after an import; the payload arrives
-    // wrapped in a WailsEvent, so the colors sit under `data`.
-    await page.evaluate((theme) => {
-      window.__cmdexE2E?.emit('settings-changed', {
-        name: 'settings-changed',
-        data: { theme: theme.id, customThemes: JSON.stringify([theme]) },
-        sender: 'e2e',
-      });
-    }, CUSTOM_THEME);
+    await emitSettingsChanged(page, {
+      theme: CUSTOM_THEME.id,
+      customThemes: JSON.stringify([CUSTOM_THEME]),
+    });
 
     await expect.poll(() => rootVar(page, '--background')).toBe('#101014');
     expect(await rootVar(page, '--foreground')).toBe('#e8e6e3');
@@ -74,16 +89,40 @@ test.describe('Custom themes', () => {
     await page.goto('/');
     await expect.poll(() => rootVar(page, '--background')).toBe('#101014');
 
-    await page.evaluate(() => {
-      window.__cmdexE2E?.emit('settings-changed', {
-        name: 'settings-changed',
-        data: { theme: 'vscode-light', customThemes: '[]' },
-        sender: 'e2e',
-      });
-    });
+    await emitSettingsChanged(page, { theme: 'vscode-light', customThemes: '[]' });
 
     await expect.poll(() => rootVar(page, '--background')).toBe('');
     expect(await rootVar(page, '--primary')).toBe('');
     expect(await page.getAttribute('html', 'data-theme')).toBe('vscode-light');
+  });
+
+  test('does not leak colors between two custom themes', async ({ page }) => {
+    await page.addInitScript((theme) => {
+      window.__cmdexE2E_SEED__ = {
+        settings: {
+          theme: theme.id,
+          customThemes: JSON.stringify([theme]),
+        },
+      };
+    }, CUSTOM_THEME);
+    await page.goto('/');
+    await expect.poll(() => rootVar(page, '--primary')).toBe('#d2691e');
+
+    // The second theme omits `primary` and `status-bar-bg`; those must fall back
+    // to the stylesheet rather than keep the first theme's values.
+    const partial = {
+      id: 'custom-partial',
+      name: 'Partial',
+      type: 'dark' as const,
+      colors: { background: '#202028', foreground: '#f0f0f0' },
+    };
+    await emitSettingsChanged(page, {
+      theme: partial.id,
+      customThemes: JSON.stringify([partial]),
+    });
+
+    await expect.poll(() => rootVar(page, '--background')).toBe('#202028');
+    expect(await rootVar(page, '--primary')).toBe('');
+    expect(await rootVar(page, '--status-bar-bg')).toBe('');
   });
 });
