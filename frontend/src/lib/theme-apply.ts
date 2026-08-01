@@ -23,19 +23,48 @@ export function applyTheme(themeId: string, customColors?: Record<string, string
 }
 
 /**
+ * Whether a parsed entry is actually shaped like a `CustomTheme`.
+ *
+ * The stored blob is untrusted: it survives app upgrades and can be hand-edited,
+ * so entries like `null` would otherwise reach callers that dereference `.id` or
+ * feed `.colors` to `setProperty`.
+ */
+function isCustomTheme(value: unknown): value is CustomTheme {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const theme = value as Record<string, unknown>;
+  if (
+    typeof theme.id !== 'string' ||
+    typeof theme.name !== 'string' ||
+    (theme.type !== 'dark' && theme.type !== 'light') ||
+    !theme.colors ||
+    typeof theme.colors !== 'object' ||
+    Array.isArray(theme.colors)
+  ) {
+    return false;
+  }
+  return Object.values(theme.colors as Record<string, unknown>).every((c) => typeof c === 'string');
+}
+
+/**
  * Parse the stored `customThemes` JSON blob.
  *
- * Settings hold this as a string, and a malformed or non-array value must not
- * break theming — every caller gets an empty list instead.
+ * Settings hold this as a string, and a malformed value must not break theming —
+ * every caller gets a list of well-formed themes, or an empty one.
  */
 export function parseCustomThemes(raw?: string): CustomTheme[] {
   if (!raw || raw === '[]') return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    parsed = JSON.parse(raw);
   } catch {
     return [];
   }
+  if (!Array.isArray(parsed)) return [];
+  const themes = parsed.filter(isCustomTheme);
+  if (themes.length !== parsed.length) {
+    console.warn(`theme-apply: discarded ${parsed.length - themes.length} malformed custom theme(s)`);
+  }
+  return themes;
 }
 
 /** The stored custom theme matching `themeId`, if the active theme is a custom one. */

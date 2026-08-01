@@ -9,7 +9,7 @@ import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
 import { toast } from 'sonner'
-import { applyTheme, applyDensity, applyFonts, resolveActiveCustomTheme } from './lib/theme-apply'
+import { applyTheme, applyDensity, applyFonts, parseCustomThemes, resolveActiveCustomTheme } from './lib/theme-apply'
 
 const App = lazy(() => import('./App'))
 const SettingsPage = lazy(() => import('./components/SettingsPage'))
@@ -98,17 +98,9 @@ if (isLauncherWindow) {
                 if (s.windowY !== undefined) setWindowY(s.windowY)
                 if (s.windowWidth !== undefined) setWindowWidth(s.windowWidth)
                 if (s.windowHeight !== undefined) setWindowHeight(s.windowHeight)
-                // Parse custom themes before the first applyTheme so a saved custom
-                // theme paints with its own colors instead of the default palette.
-                let loadedCustomThemes: CustomTheme[] = []
-                if (s.customThemes && s.customThemes !== '[]') {
-                    try {
-                        const parsed = JSON.parse(s.customThemes)
-                        loadedCustomThemes = Array.isArray(parsed) ? parsed : []
-                        syncCustomThemes(loadedCustomThemes)
-                    } catch { /* ignore parse error */ }
-                }
-                const loadedCustom = loadedCustomThemes.find(c => c.id === t)
+                const parsed = parseCustomThemes(s.customThemes)
+                if (parsed.length > 0) syncCustomThemes(parsed)
+                const loadedCustom = parsed.find(c => c.id === t)
                 applyTheme(t, loadedCustom?.colors ?? null)
                 applyDensity(s.density || 'comfortable')
                 applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
