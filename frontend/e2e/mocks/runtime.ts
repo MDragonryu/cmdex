@@ -398,15 +398,35 @@ export class CancellablePromise<T> extends Promise<T> {
     Object.keys(presets).forEach((k) => delete presets[k]);
     nextId = 0;
   },
-  seed(data: { categories?: any[]; commands?: any[]; presets?: Record<string, any[]> }) {
+  seed(data: {
+    categories?: any[];
+    commands?: any[];
+    presets?: Record<string, any[]>;
+    settings?: Record<string, any>;
+  }) {
     if (data.categories) categories = data.categories;
     if (data.commands) commands = data.commands;
     if (data.presets) Object.assign(presets, data.presets);
+    // Settings are merged, not replaced, so a partial seed keeps the defaults
+    // for every field it does not mention — same as the init-script path below.
+    if (data.settings) Object.assign(settings, data.settings);
     nextId = Math.max(
       ...categories.map((c) => parseInt(c.id) || 0),
       ...commands.map((c) => parseInt(c.id) || 0),
       0,
     );
+  },
+  // Deliver an event to the app as the real runtime would. Callers pass the
+  // full `WailsEvent` shape ({ name, data, sender }) because that is what
+  // window-to-window emits look like on the receiving side.
+  emit(eventName: string, data: any) {
+    Events.Emit(eventName, data);
+  },
+  // True once the app has subscribed to `eventName`. Tests must wait for this
+  // before emitting: the app registers its listeners only after the async
+  // event-name lookup resolves, and an emit before that is dropped silently.
+  hasListener(eventName: string) {
+    return (eventListeners[eventName] || []).length > 0;
   },
 };
 

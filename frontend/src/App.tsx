@@ -145,6 +145,9 @@ function App() {
     const terminalRefs = useRef<Record<string, TerminalHandle>>({});
 
     const [theme, setTheme] = useState<string>('vscode-dark');
+    // Custom themes must live in state (not only in settingsRef) so the theme
+    // effect below re-runs when they are imported/removed in the settings window.
+    const [customThemes, setCustomThemes] = useState<CustomTheme[]>([]);
 
     const [uiFont, setUiFont] = useState<string>('Inter');
     const [monoFont, setMonoFont] = useState<string>('JetBrains Mono');
@@ -383,11 +386,18 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- use sessionIdsKey to avoid re-subscribing when only session.running changes
     }, [sessionIdsKey, eventsInitialized]);
 
+    // A custom theme has no `[data-theme="custom-..."]` CSS rule, so its colors
+    // must be passed to applyTheme() to be written as inline CSS variables on
+    // the root element. Without them the main window silently falls back to the
+    // default palette while the settings window (which previews the imported
+    // colors directly) still looks correct.
     useEffect(() => {
-        applyTheme(theme);
+        const custom = customThemes.find((c) => c.id === theme);
+        applyTheme(theme, custom?.colors ?? null);
         settingsRef.current.theme = theme;
+        settingsRef.current.customThemes = customThemes;
         flushSettings();
-    }, [theme]);
+    }, [theme, customThemes]);
 
     useEffect(() => {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -532,11 +542,14 @@ function App() {
 
                 let migratedCustomThemes: CustomTheme[] = [];
                 try {
-                    if (s.customThemes && s.customThemes !== '[]') {
-                        migratedCustomThemes = JSON.parse(s.customThemes);
-                    } else {
-                        const lsCustom = localStorage.getItem(CUSTOM_THEMES_KEY);
-                        if (lsCustom) migratedCustomThemes = JSON.parse(lsCustom);
+                    const rawCustomThemes = s.customThemes && s.customThemes !== '[]'
+                        ? s.customThemes
+                        : localStorage.getItem(CUSTOM_THEMES_KEY);
+                    if (rawCustomThemes) {
+                        const parsed = JSON.parse(rawCustomThemes);
+                        // A non-array payload must not reach state — the theme
+                        // effect calls .find() on it.
+                        if (Array.isArray(parsed)) migratedCustomThemes = parsed;
                     }
                 } catch { /* ignore parse errors */ }
 
@@ -565,6 +578,7 @@ function App() {
                 settingsLoadedRef.current = true;
 
                 // Apply state — each setter triggers its effect which calls flushSettings
+                setCustomThemes(migratedCustomThemes);
                 setTheme(migratedTheme);
                 setUiFont(migratedUiFont);
                 setMonoFont(migratedMonoFont);
@@ -656,12 +670,8 @@ function App() {
                 density: payload.density ?? current.density,
                 defaultWorkingDir: payload.defaultWorkingDir ?? current.defaultWorkingDir,
             };
-            if (payload.locale) i18n.changeLanguage(payload.locale);
-            if (payload.theme) setTheme(payload.theme);
-            if (payload.uiFont) setUiFont(payload.uiFont);
-            if (payload.monoFont) setMonoFont(payload.monoFont);
-            if (payload.density) setDensity(payload.density);
-            if (payload.defaultWorkingDir) setDefaultWorkingDir(payload.defaultWorkingDir);
+            // Parse custom themes before setTheme so the theme effect always sees
+            // the list the incoming theme id may refer to (a freshly imported one).
             if (payload.customThemes !== undefined) {
                 try {
                     const parsed = typeof payload.customThemes === 'string'
@@ -669,11 +679,18 @@ function App() {
                         : payload.customThemes;
                     if (Array.isArray(parsed)) {
                         settingsRef.current.customThemes = parsed;
+                        setCustomThemes(parsed);
                     }
                 } catch {
                     // Do not overwrite existing customThemes on parse failure
                 }
             }
+            if (payload.locale) i18n.changeLanguage(payload.locale);
+            if (payload.theme) setTheme(payload.theme);
+            if (payload.uiFont) setUiFont(payload.uiFont);
+            if (payload.monoFont) setMonoFont(payload.monoFont);
+            if (payload.density) setDensity(payload.density);
+            if (payload.defaultWorkingDir) setDefaultWorkingDir(payload.defaultWorkingDir);
         });
         return cleanup;
     }, [eventsInitialized]);
