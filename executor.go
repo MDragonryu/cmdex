@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,8 +42,8 @@ func NewExecutor() *Executor {
 func stripShebang(content string) string {
 	s := strings.TrimSpace(content)
 	if strings.HasPrefix(s, "#!") {
-		if idx := strings.Index(s, "\n"); idx != -1 {
-			return s[idx+1:]
+		if _, after, ok := strings.Cut(s, "\n"); ok {
+			return after
 		}
 		return ""
 	}
@@ -69,7 +71,7 @@ func (e *Executor) OpenInTerminal(terminalID string, scriptContent string, worki
 		}
 	}
 
-	return fmt.Errorf("no terminal emulator found")
+	return errors.New("no terminal emulator found")
 }
 
 func shellQuoteDir(dir string) string {
@@ -148,7 +150,7 @@ func (e *Executor) darwinTerminals() []terminalDef {
 			asEscaped := strings.ReplaceAll(body, `\`, `\\`)
 			asEscaped = strings.ReplaceAll(asEscaped, `"`, `\"`)
 			s := fmt.Sprintf(script, asEscaped)
-			return exec.Command("osascript", "-e", s).Start()
+			return exec.CommandContext(context.Background(), "osascript", "-e", s).Start()
 		}
 	}
 
@@ -158,7 +160,10 @@ func (e *Executor) darwinTerminals() []terminalDef {
 
 	return []terminalDef{
 		{
-			ID: "terminal", Name: "Terminal", Paths: []string{"/System/Applications/Utilities/Terminal.app"}, IsApp: true,
+			ID:    "terminal",
+			Name:  "Terminal",
+			Paths: []string{"/System/Applications/Utilities/Terminal.app"},
+			IsApp: true,
 			LaunchFn: osa("Terminal", `tell application "Terminal"
 	do script "%s"
 	activate
@@ -187,7 +192,7 @@ end tell`),
 	delay 0.5
 	tell application "System Events" to keystroke "%s"
 	tell application "System Events" to key code 36`, asEscaped)
-				return exec.Command("osascript", "-e", s).Start()
+				return exec.CommandContext(context.Background(), "osascript", "-e", s).Start()
 			},
 		},
 		{
@@ -198,7 +203,7 @@ end tell`),
 					args = append([]string{"--working-directory", workingDir}, args...)
 				}
 				bin := resolveDarwinBin(alacrittyBin, alacrittyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
@@ -209,7 +214,7 @@ end tell`),
 					args = append([]string{"--directory", workingDir}, args...)
 				}
 				bin := resolveDarwinBin(kittyBin, kittyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
@@ -220,13 +225,13 @@ end tell`),
 					args = append([]string{"--working-directory=" + workingDir}, args...)
 				}
 				bin := resolveDarwinBin(ghosttyBin, ghosttyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
 			ID: "hyper", Name: "Hyper", Paths: []string{"/Applications/Hyper.app"}, IsApp: true,
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
-				return exec.Command("open", "-a", "Hyper").Start()
+				return exec.CommandContext(context.Background(), "open", "-a", "Hyper").Start()
 			},
 		},
 	}
@@ -239,7 +244,7 @@ func (e *Executor) linuxTerminals() []terminalDef {
 			if workingDir != "" && dirFlag != nil {
 				args = append(dirFlag(workingDir), args...)
 			}
-			return exec.Command(bin, args...).Start()
+			return exec.CommandContext(context.Background(), bin, args...).Start()
 		}
 	}
 
@@ -294,7 +299,9 @@ func (e *Executor) linuxTerminals() []terminalDef {
 				if workingDir != "" {
 					body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 				}
-				return exec.Command("xterm", "-e", ex.shell, "-c", body+"; exec "+ex.shell).Start()
+				//nolint:gosec // G204: shell/body are local executor fields and user-authored script content by design
+				return exec.CommandContext(context.Background(), "xterm", "-e", ex.shell, "-c", body+"; exec "+ex.shell).
+					Start()
 			}},
 	}
 }
@@ -313,7 +320,7 @@ func (e *Executor) windowsTerminals() []terminalDef {
 				if workingDir != "" {
 					args = append([]string{"-d", workingDir}, args...)
 				}
-				return exec.Command("wt", args...).Start()
+				return exec.CommandContext(context.Background(), "wt", args...).Start()
 			}},
 		{ID: "cmd", Name: "Command Prompt", Paths: []string{"cmd"},
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
@@ -321,7 +328,7 @@ func (e *Executor) windowsTerminals() []terminalDef {
 				if workingDir != "" {
 					cmdBody = fmt.Sprintf("cd /d %s && %s", escapeCmdExe(workingDir), cmdBody)
 				}
-				return exec.Command("cmd", "/c", "start", "cmd", "/k", cmdBody).Start()
+				return exec.CommandContext(context.Background(), "cmd", "/c", "start", "cmd", "/k", cmdBody).Start()
 			}},
 		{ID: "pwsh", Name: "PowerShell", Paths: []string{"pwsh", "powershell"},
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
@@ -330,9 +337,13 @@ func (e *Executor) windowsTerminals() []terminalDef {
 					bin = "pwsh"
 				}
 				if workingDir != "" {
-					body = fmt.Sprintf("Set-Location -LiteralPath '%s' -ErrorAction Stop; %s", strings.ReplaceAll(workingDir, "'", "''"), body)
+					body = fmt.Sprintf(
+						"Set-Location -LiteralPath '%s' -ErrorAction Stop; %s",
+						strings.ReplaceAll(workingDir, "'", "''"),
+						body,
+					)
 				}
-				return exec.Command(bin, "-NoExit", "-Command", body).Start()
+				return exec.CommandContext(context.Background(), bin, "-NoExit", "-Command", body).Start()
 			}},
 	}
 }
@@ -355,7 +366,11 @@ func (e *Executor) EvalDefaults(defs []VariableDefinition) map[string]string {
 		cel.Function("env",
 			cel.Overload("env_string", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					key := string(val.(types.String))
+					s, ok := val.(types.String)
+					if !ok {
+						return types.NewErr("expected string")
+					}
+					key := string(s)
 					return types.String(os.Getenv(key))
 				}),
 			),
@@ -363,7 +378,11 @@ func (e *Executor) EvalDefaults(defs []VariableDefinition) map[string]string {
 		cel.Function("date",
 			cel.Overload("date_string", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					layout := string(val.(types.String))
+					s, ok := val.(types.String)
+					if !ok {
+						return types.NewErr("expected string")
+					}
+					layout := string(s)
 					return types.String(time.Now().Format(layout))
 				}),
 			),

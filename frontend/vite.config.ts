@@ -10,7 +10,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss(), wails("./bindings")],
     server: {
+      host: "127.0.0.1",
       port: parseInt(env.VITE_PORT) || 9245,
+      strictPort: true,
     },
     resolve: {
       alias: {
@@ -18,7 +20,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      chunkSizeWarningLimit: 1000,
+      // Desktop/Wails loads assets locally — a ~1MB main chunk is fine.
+      // Keep feature lazy-loads (e.g. Terminal/xterm); skip vendor chunking.
+      chunkSizeWarningLimit: 1500,
     },
   }
 })

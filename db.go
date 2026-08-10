@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +23,10 @@ type DB struct {
 	dataDir string
 }
 
+// appendToEndPosition is an out-of-range index passed to UpdateCommandPosition
+// to mean "insert after the last command" — it clamps to len(ordered).
+const appendToEndPosition = 999999
+
 func NewDB() (*DB, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -27,8 +34,11 @@ func NewDB() (*DB, error) {
 	}
 
 	dataDir := filepath.Join(homeDir, ".cmdex")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+	if err := os.Chmod(dataDir, 0750); err != nil { //nolint:gosec // G302: 0750 is correct for a dir, not a file
+		return nil, fmt.Errorf("chmod data dir: %w", err)
 	}
 
 	dbPath := filepath.Join(dataDir, "cmdex.db")
@@ -39,7 +49,7 @@ func NewDB() (*DB, error) {
 
 	db := &DB{conn: conn, dataDir: dataDir}
 	if err := db.runMigrations(); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
@@ -52,18 +62,27 @@ func (db *DB) Close() error {
 
 func (db *DB) runMigrations() error {
 	var currentVersion int
-	err := db.conn.QueryRow("SELECT version FROM schema_version LIMIT 1").Scan(&currentVersion)
+	err := db.conn.QueryRowContext(context.Background(), "SELECT version FROM schema_version LIMIT 1").
+		Scan(&currentVersion)
 	if err != nil {
 		currentVersion = 0
 		if err == sql.ErrNoRows {
-			if _, err := db.conn.Exec("INSERT INTO schema_version (version) VALUES (0)"); err != nil {
+			if _, err := db.conn.ExecContext(
+				context.Background(),
+				"INSERT INTO schema_version (version) VALUES (0)",
+			); err != nil {
 				return fmt.Errorf("insert initial schema_version: %w", err)
 			}
 		} else {
-			if _, err := db.conn.Exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"); err != nil {
+			if _, err := db.conn.ExecContext(context.Background(),
+				"CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)",
+			); err != nil {
 				return fmt.Errorf("create schema_version table: %w", err)
 			}
-			if _, err := db.conn.Exec("INSERT INTO schema_version (version) VALUES (0)"); err != nil {
+			if _, err := db.conn.ExecContext(
+				context.Background(),
+				"INSERT INTO schema_version (version) VALUES (0)",
+			); err != nil {
 				return fmt.Errorf("insert initial schema_version: %w", err)
 			}
 		}
@@ -75,44 +94,48 @@ func (db *DB) runMigrations() error {
 		}
 
 		if m.DisableFKDuringMigration {
-			if _, err := db.conn.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+			if _, err := db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF"); err != nil {
 				return fmt.Errorf("disable FK for migration %d: %w", m.Version, err)
 			}
 		}
 
-		tx, err := db.conn.Begin()
+		tx, err := db.conn.BeginTx(context.Background(), nil)
 		if err != nil {
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("begin migration %d tx: %w", m.Version, err)
 		}
 
 		if err := m.Up(tx); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("migration %d (%s) up: %w", m.Version, m.Description, err)
 		}
 
-		if _, err := tx.Exec("UPDATE schema_version SET version = ?", m.Version); err != nil {
-			tx.Rollback()
+		if _, err := tx.ExecContext(
+			context.Background(),
+			"UPDATE schema_version SET version = ?",
+			m.Version,
+		); err != nil {
+			_ = tx.Rollback()
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("update schema_version for migration %d: %w", m.Version, err)
 		}
 
 		if err := tx.Commit(); err != nil {
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("commit migration %d: %w", m.Version, err)
 		}
 
 		if m.DisableFKDuringMigration {
-			if _, err := db.conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
+			if _, err := db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
 				return fmt.Errorf("re-enable FK after migration %d: %w", m.Version, err)
 			}
 		}
@@ -125,59 +148,66 @@ func (db *DB) runMigrations() error {
 // It is a dev/testing utility and is not exposed to the frontend.
 func (db *DB) RollbackTo(targetVersion int) error {
 	var currentVersion int
-	err := db.conn.QueryRow("SELECT version FROM schema_version LIMIT 1").Scan(&currentVersion)
+	err := db.conn.QueryRowContext(context.Background(), "SELECT version FROM schema_version LIMIT 1").
+		Scan(&currentVersion)
 	if err != nil {
-		return fmt.Errorf("schema_version not initialized")
+		return errors.New("schema_version not initialized")
 	}
 
 	if targetVersion >= currentVersion {
 		return nil
 	}
 
-	// Iterate in reverse order
-	for i := len(migrations.Migrations) - 1; i >= 0; i-- {
-		m := migrations.Migrations[i]
-		if m.Version <= targetVersion {
+	// Iterate in reverse order, only undoing migrations that are actually
+	// applied (targetVersion < m.Version <= currentVersion) — a migration
+	// with Version > currentVersion was never run and must not be rolled back.
+	for _, v := range slices.Backward(migrations.Migrations) {
+		m := v
+		if m.Version <= targetVersion || m.Version > currentVersion {
 			continue
 		}
 
 		if m.DisableFKDuringMigration {
-			if _, err := db.conn.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+			if _, err := db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF"); err != nil {
 				return fmt.Errorf("disable FK for rollback %d: %w", m.Version, err)
 			}
 		}
 
-		tx, err := db.conn.Begin()
+		tx, err := db.conn.BeginTx(context.Background(), nil)
 		if err != nil {
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("begin rollback %d tx: %w", m.Version, err)
 		}
 
 		if err := m.Down(tx); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("rollback migration %d (%s) down: %w", m.Version, m.Description, err)
 		}
 
 		if err := tx.Commit(); err != nil {
 			if m.DisableFKDuringMigration {
-				db.conn.Exec("PRAGMA foreign_keys = ON")
+				_, _ = db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
 			}
 			return fmt.Errorf("commit rollback %d: %w", m.Version, err)
 		}
 
 		if m.DisableFKDuringMigration {
-			if _, err := db.conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
+			if _, err := db.conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
 				return fmt.Errorf("re-enable FK after rollback %d: %w", m.Version, err)
 			}
 		}
 	}
 
-	if _, err := db.conn.Exec("UPDATE schema_version SET version = ?", targetVersion); err != nil {
+	if _, err := db.conn.ExecContext(
+		context.Background(),
+		"UPDATE schema_version SET version = ?",
+		targetVersion,
+	); err != nil {
 		return fmt.Errorf("update schema_version after rollback: %w", err)
 	}
 
@@ -189,7 +219,9 @@ func (db *DB) RollbackTo(targetVersion int) error {
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetCategories() ([]Category, error) {
-	rows, err := db.conn.Query("SELECT id, name, icon, color, created_at, updated_at FROM categories ORDER BY created_at")
+	rows, err := db.conn.QueryContext(context.Background(),
+		"SELECT id, name, icon, color, created_at, updated_at FROM categories ORDER BY created_at",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query categories: %w", err)
 	}
@@ -207,7 +239,7 @@ func (db *DB) GetCategories() ([]Category, error) {
 }
 
 func (db *DB) CreateCategory(cat Category) error {
-	_, err := db.conn.Exec(
+	_, err := db.conn.ExecContext(context.Background(),
 		"INSERT INTO categories (id, name, icon, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		cat.ID, cat.Name, cat.Icon, cat.Color, cat.CreatedAt, cat.UpdatedAt,
 	)
@@ -218,7 +250,7 @@ func (db *DB) CreateCategory(cat Category) error {
 }
 
 func (db *DB) UpdateCategory(cat Category) error {
-	res, err := db.conn.Exec(
+	res, err := db.conn.ExecContext(context.Background(),
 		"UPDATE categories SET name = ?, icon = ?, color = ?, updated_at = ? WHERE id = ?",
 		cat.Name, cat.Icon, cat.Color, cat.UpdatedAt, cat.ID,
 	)
@@ -233,7 +265,7 @@ func (db *DB) UpdateCategory(cat Category) error {
 }
 
 func (db *DB) DeleteCategory(id string) error {
-	res, err := db.conn.Exec("DELETE FROM categories WHERE id = ?", id)
+	res, err := db.conn.ExecContext(context.Background(), "DELETE FROM categories WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete category: %w", err)
 	}
@@ -249,7 +281,8 @@ func (db *DB) DeleteCategory(id string) error {
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetCommands() ([]Command, error) {
-	rows, err := db.conn.Query(
+	rows, err := db.conn.QueryContext(
+		context.Background(),
 		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands ORDER BY position ASC",
 	)
 	if err != nil {
@@ -262,7 +295,17 @@ func (db *DB) GetCommands() ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan command: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -284,7 +327,8 @@ func (db *DB) GetCommands() ([]Command, error) {
 }
 
 func (db *DB) GetCommandsByCategory(categoryID string) ([]Command, error) {
-	rows, err := db.conn.Query(
+	rows, err := db.conn.QueryContext(
+		context.Background(),
 		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands WHERE category_id = ? ORDER BY position ASC",
 		categoryID,
 	)
@@ -298,7 +342,17 @@ func (db *DB) GetCommandsByCategory(categoryID string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan command: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -356,73 +410,67 @@ type ImportCommandInput struct {
 
 // ImportCommands imports commands from import data structure
 func (db *DB) ImportCommands(commands []ImportCommandInput) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Build category name -> ID map
 	categoryMap := make(map[string]string)
-	rows, err := tx.Query("SELECT id, name FROM categories")
+	// Closed explicitly (not deferred) below: further writes happen on the
+	// same tx afterward and must not race an open Rows on it.
+	rows, err := tx.QueryContext(context.Background(), "SELECT id, name FROM categories")
 	if err != nil {
 		return fmt.Errorf("query categories: %w", err)
 	}
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
-			rows.Close()
+			_ = rows.Close() //nolint:sqlclosecheck // see comment above the query
 			return fmt.Errorf("scan category: %w", err)
 		}
 		categoryMap[name] = id
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close() //nolint:sqlclosecheck // see comment above the query
+		return fmt.Errorf("iterate categories: %w", err)
+	}
+	_ = rows.Close() //nolint:sqlclosecheck // see comment above the query
 
 	for _, importedCmd := range commands {
-		// Determine category ID
-		var categoryID *string
+		catID := ""
 		if importedCmd.CategoryName != "" {
-			if catID, exists := categoryMap[importedCmd.CategoryName]; exists {
-				categoryID = &catID
+			if existing, exists := categoryMap[importedCmd.CategoryName]; exists {
+				catID = existing
 			} else {
-				// Create new category
 				newCatID := uuid.New().String()
 				now := time.Now()
-				_, err := tx.Exec(
+				_, err := tx.ExecContext(context.Background(),
 					"INSERT INTO categories (id, name, icon, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 					newCatID, importedCmd.CategoryName, "", "", now, now,
 				)
 				if err != nil {
 					return fmt.Errorf("create category: %w", err)
 				}
-				categoryID = &newCatID
+				catID = newCatID
 				categoryMap[importedCmd.CategoryName] = newCatID
 			}
 		}
 
-		// Create command
 		cmdID := uuid.New().String()
 		now := time.Now()
 
-		var catIDPtr interface{}
-		if categoryID != nil {
-			catIDPtr = *categoryID
-		}
-
-		var titlePtr, descPtr interface{}
-		if importedCmd.Title != "" {
-			titlePtr = importedCmd.Title
-		}
-		if importedCmd.Description != "" {
-			descPtr = importedCmd.Description
-		}
-
-		// Get max position in category
 		var maxPos int
-		if categoryID != nil {
-			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", *categoryID).Scan(&maxPos)
+		if catID != "" {
+			err = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", catID).
+				Scan(&maxPos)
 		} else {
-			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").Scan(&maxPos)
+			err = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").
+				Scan(&maxPos)
+		}
+		if err != nil {
+			return fmt.Errorf("query max position: %w", err)
 		}
 
 		workingDirJSON, err := json.Marshal(importedCmd.WorkingDir)
@@ -430,10 +478,19 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 			return fmt.Errorf("marshal working_dir: %w", err)
 		}
 
-		_, err = tx.Exec(
+		_, err = tx.ExecContext(
+			context.Background(),
 			`INSERT INTO commands (id, title, description, script_content, category_id, position, created_at, updated_at, working_dir)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			cmdID, titlePtr, descPtr, importedCmd.ScriptContent, catIDPtr, maxPos+1, now, now, string(workingDirJSON),
+			cmdID,
+			nullableString(importedCmd.Title),
+			nullableString(importedCmd.Description),
+			importedCmd.ScriptContent,
+			nullableString(catID),
+			maxPos+1,
+			now,
+			now,
+			string(workingDirJSON),
 		)
 		if err != nil {
 			return fmt.Errorf("insert command: %w", err)
@@ -444,11 +501,11 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 			if tag == "" {
 				continue
 			}
-			_, err := tx.Exec("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
+			_, err := tx.ExecContext(context.Background(), "INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
 			if err != nil {
 				return fmt.Errorf("upsert tag: %w", err)
 			}
-			_, err = tx.Exec(
+			_, err = tx.ExecContext(context.Background(),
 				"INSERT OR IGNORE INTO command_tags (command_id, tag_id) SELECT ?, id FROM tags WHERE name = ?",
 				cmdID, tag,
 			)
@@ -459,9 +516,15 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 
 		// Save variables
 		for i, v := range importedCmd.Variables {
-			_, err := tx.Exec(
+			_, err := tx.ExecContext(
+				context.Background(),
 				"INSERT INTO variable_definitions (command_id, name, description, example, default_expr, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-				cmdID, v.Name, v.Description, v.Example, v.Default, i,
+				cmdID,
+				v.Name,
+				v.Description,
+				v.Example,
+				v.Default,
+				i,
 			)
 			if err != nil {
 				return fmt.Errorf("insert variable: %w", err)
@@ -471,7 +534,7 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 		// Save presets
 		for _, p := range importedCmd.Presets {
 			presetID := uuid.New().String()
-			_, err := tx.Exec(
+			_, err := tx.ExecContext(context.Background(),
 				"INSERT INTO variable_presets (id, command_id, name, position) VALUES (?, ?, ?, ?)",
 				presetID, cmdID, p.Name, 0,
 			)
@@ -479,7 +542,7 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 				return fmt.Errorf("insert preset: %w", err)
 			}
 			for k, v := range p.Values {
-				_, err := tx.Exec(
+				_, err := tx.ExecContext(context.Background(),
 					"INSERT INTO preset_values (preset_id, variable_name, value) VALUES (?, ?, ?)",
 					presetID, k, v,
 				)
@@ -497,8 +560,10 @@ func (db *DB) GetCommand(id string) (Command, error) {
 	var c Command
 	var catID sql.NullString
 	var workingDirRaw string
-	err := db.conn.QueryRow(
-		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands WHERE id = ?", id,
+	err := db.conn.QueryRowContext(
+		context.Background(),
+		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands WHERE id = ?",
+		id,
 	).Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw)
 	if err != nil {
 		return c, fmt.Errorf("get command %s: %w", id, err)
@@ -515,7 +580,7 @@ func (db *DB) GetCommand(id string) (Command, error) {
 
 func (db *DB) loadCommandRelations(cmd *Command) error {
 	// Tags
-	tagRows, err := db.conn.Query(
+	tagRows, err := db.conn.QueryContext(context.Background(),
 		"SELECT t.name FROM tags t JOIN command_tags ct ON ct.tag_id = t.id WHERE ct.command_id = ? ORDER BY t.name",
 		cmd.ID,
 	)
@@ -537,7 +602,8 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 	}
 
 	// Variables
-	varRows, err := db.conn.Query(
+	varRows, err := db.conn.QueryContext(
+		context.Background(),
 		"SELECT name, description, example, default_expr, sort_order FROM variable_definitions WHERE command_id = ? ORDER BY sort_order",
 		cmd.ID,
 	)
@@ -559,7 +625,7 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 	}
 
 	// Presets — ORDER BY position must match GetPresets / ReorderPresets
-	presetRows, err := db.conn.Query(
+	presetRows, err := db.conn.QueryContext(context.Background(),
 		"SELECT id, name, position FROM variable_presets WHERE command_id = ? ORDER BY position, name",
 		cmd.ID,
 	)
@@ -576,7 +642,9 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 		}
 		p.Values = map[string]string{}
 
-		valRows, err := db.conn.Query(
+		// Closed explicitly (not deferred): this runs inside the presetRows
+		// loop, so deferring would keep one Rows open per preset until return.
+		valRows, err := db.conn.QueryContext(context.Background(),
 			"SELECT variable_name, value FROM preset_values WHERE preset_id = ?", p.ID,
 		)
 		if err != nil {
@@ -585,12 +653,12 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 		for valRows.Next() {
 			var k, v string
 			if err := valRows.Scan(&k, &v); err != nil {
-				valRows.Close()
+				_ = valRows.Close() //nolint:sqlclosecheck // see comment above the query
 				return fmt.Errorf("scan preset value: %w", err)
 			}
 			p.Values[k] = v
 		}
-		valRows.Close()
+		_ = valRows.Close() //nolint:sqlclosecheck // see comment above the query
 		if err := valRows.Err(); err != nil {
 			return err
 		}
@@ -600,14 +668,14 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 	return presetRows.Err()
 }
 
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}
 	return s
 }
 
-func nullableNullString(ns sql.NullString) interface{} {
+func nullableNullString(ns sql.NullString) any {
 	if !ns.Valid || ns.String == "" {
 		return nil
 	}
@@ -615,23 +683,30 @@ func nullableNullString(ns sql.NullString) interface{} {
 }
 
 func (db *DB) CreateCommand(cmd Command) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	workingDirJSON, err := json.Marshal(cmd.WorkingDir)
 	if err != nil {
 		return fmt.Errorf("marshal working_dir: %w", err)
 	}
 
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(
+		context.Background(),
 		`INSERT INTO commands (id, title, description, script_content, category_id, position, created_at, updated_at, working_dir)
 		 VALUES (?, ?, ?, ?, ?, COALESCE((SELECT MAX(position)+1 FROM commands WHERE category_id IS ?), 0), ?, ?, ?)`,
-		cmd.ID, nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent,
-		nullableString(cmd.CategoryID), nullableString(cmd.CategoryID),
-		cmd.CreatedAt, cmd.UpdatedAt, string(workingDirJSON),
+		cmd.ID,
+		nullableNullString(cmd.Title),
+		nullableNullString(cmd.Description),
+		cmd.ScriptContent,
+		nullableString(cmd.CategoryID),
+		nullableString(cmd.CategoryID),
+		cmd.CreatedAt,
+		cmd.UpdatedAt,
+		string(workingDirJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("insert command: %w", err)
@@ -648,41 +723,24 @@ func (db *DB) CreateCommand(cmd Command) error {
 }
 
 func (db *DB) UpdateCommand(cmd Command) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
-	// Fetch existing command to check if category_id changed
 	var oldCategoryID sql.NullString
-	err = tx.QueryRow("SELECT category_id FROM commands WHERE id = ?", cmd.ID).Scan(&oldCategoryID)
+	err = tx.QueryRowContext(context.Background(), "SELECT category_id FROM commands WHERE id = ?", cmd.ID).
+		Scan(&oldCategoryID)
 	if err != nil {
 		return fmt.Errorf("get existing command: %w", err)
 	}
 
-	// Determine if category changed
-	oldCat := oldCategoryID.String
-	newCat := cmd.CategoryID
-	categoryChanged := oldCat != newCat
-
-	// If category changed, route through UpdateCommandPosition logic
-	if categoryChanged {
-		// Rollback this transaction and use UpdateCommandPosition instead for the move
-		tx.Rollback()
-
-		// Use UpdateCommandPosition to handle the category move with proper reindexing
-		// Append to end of new category (position = len of target category)
-		if err := db.UpdateCommandPosition(cmd.ID, newCat, 999999); err != nil {
+	// Category moves need reindexing; share this tx with the field/tag/var writes below.
+	if oldCategoryID.String != cmd.CategoryID {
+		if err := db.updateCommandPositionTx(tx, cmd.ID, cmd.CategoryID, appendToEndPosition); err != nil {
 			return err
 		}
-
-		// Now open a new transaction to update the other fields
-		tx, err = db.conn.Begin()
-		if err != nil {
-			return fmt.Errorf("begin tx after position update: %w", err)
-		}
-		defer tx.Rollback()
 	}
 
 	workingDirJSON, err := json.Marshal(cmd.WorkingDir)
@@ -690,27 +748,27 @@ func (db *DB) UpdateCommand(cmd Command) error {
 		return fmt.Errorf("marshal working_dir: %w", err)
 	}
 
-	// Update all fields except category_id and position (those are handled by UpdateCommandPosition if changed)
-	var updateErr error
-	if categoryChanged {
-		// Category already updated by UpdateCommandPosition, so skip it
-		_, updateErr = tx.Exec(
-			"UPDATE commands SET title = ?, description = ?, script_content = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent, cmd.UpdatedAt, string(workingDirJSON), cmd.ID,
-		)
-	} else {
-		// Category didn't change, safe to update everything
-		_, updateErr = tx.Exec(
-			"UPDATE commands SET title = ?, description = ?, script_content = ?, category_id = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent, nullableString(cmd.CategoryID), cmd.UpdatedAt, string(workingDirJSON), cmd.ID,
-		)
-	}
-	if updateErr != nil {
-		return fmt.Errorf("update command: %w", updateErr)
+	_, err = tx.ExecContext(
+		context.Background(),
+		"UPDATE commands SET title = ?, description = ?, script_content = ?, category_id = ?, updated_at = ?, working_dir = ? WHERE id = ?",
+		nullableNullString(cmd.Title),
+		nullableNullString(cmd.Description),
+		cmd.ScriptContent,
+		nullableString(cmd.CategoryID),
+		cmd.UpdatedAt,
+		string(workingDirJSON),
+		cmd.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update command: %w", err)
 	}
 
 	// Replace tags
-	if _, err := tx.Exec("DELETE FROM command_tags WHERE command_id = ?", cmd.ID); err != nil {
+	if _, err := tx.ExecContext(
+		context.Background(),
+		"DELETE FROM command_tags WHERE command_id = ?",
+		cmd.ID,
+	); err != nil {
 		return fmt.Errorf("delete old tags: %w", err)
 	}
 	if err := db.saveTags(tx, cmd.ID, cmd.Tags); err != nil {
@@ -718,7 +776,11 @@ func (db *DB) UpdateCommand(cmd Command) error {
 	}
 
 	// Replace variables
-	if _, err := tx.Exec("DELETE FROM variable_definitions WHERE command_id = ?", cmd.ID); err != nil {
+	if _, err := tx.ExecContext(
+		context.Background(),
+		"DELETE FROM variable_definitions WHERE command_id = ?",
+		cmd.ID,
+	); err != nil {
 		return fmt.Errorf("delete old variables: %w", err)
 	}
 	if err := db.saveVariables(tx, cmd.ID, cmd.Variables); err != nil {
@@ -726,7 +788,7 @@ func (db *DB) UpdateCommand(cmd Command) error {
 	}
 
 	// Clean up stale preset values for variables that no longer exist
-	_, err = tx.Exec(`
+	_, err = tx.ExecContext(context.Background(), `
 		DELETE FROM preset_values
 		WHERE preset_id IN (
 			SELECT id FROM variable_presets WHERE command_id = ?
@@ -744,7 +806,7 @@ func (db *DB) UpdateCommand(cmd Command) error {
 }
 
 func (db *DB) RenameCommand(id string, title string) error {
-	res, err := db.conn.Exec(
+	res, err := db.conn.ExecContext(context.Background(),
 		"UPDATE commands SET title = ?, updated_at = ? WHERE id = ?",
 		nullableString(title), time.Now(), id,
 	)
@@ -759,7 +821,7 @@ func (db *DB) RenameCommand(id string, title string) error {
 }
 
 func (db *DB) DeleteCommand(id string) error {
-	res, err := db.conn.Exec("DELETE FROM commands WHERE id = ?", id)
+	res, err := db.conn.ExecContext(context.Background(), "DELETE FROM commands WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete command: %w", err)
 	}
@@ -775,21 +837,32 @@ func (db *DB) DeleteCommand(id string) error {
 // newCategoryID may be empty string (uncategorized).
 // newIndex is the 0-based insertion index within the target category.
 func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex int) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
+	if err := db.updateCommandPositionTx(tx, id, newCategoryID, newIndex); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// updateCommandPositionTx is the transactional core of UpdateCommandPosition.
+// Callers that already hold a transaction (e.g. UpdateCommand) use this so the
+// category move shares the same commit/rollback path as later writes.
+func (db *DB) updateCommandPositionTx(tx *sql.Tx, id string, newCategoryID string, newIndex int) error {
 	// Fetch all commands in the target category, excluding the moving one
 	var rows *sql.Rows
+	var err error
 	if newCategoryID == "" {
-		rows, err = tx.Query(
+		rows, err = tx.QueryContext(context.Background(),
 			"SELECT id FROM commands WHERE (category_id IS NULL OR category_id = '') AND id != ? ORDER BY position ASC",
 			id,
 		)
 	} else {
-		rows, err = tx.Query(
+		rows, err = tx.QueryContext(context.Background(),
 			"SELECT id FROM commands WHERE category_id = ? AND id != ? ORDER BY position ASC",
 			newCategoryID, id,
 		)
@@ -802,12 +875,12 @@ func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex in
 	for rows.Next() {
 		var rowID string
 		if err := rows.Scan(&rowID); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("scan id: %w", err)
 		}
 		ordered = append(ordered, rowID)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
@@ -827,12 +900,12 @@ func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex in
 	for i, cmdID := range ordered {
 		var execErr error
 		if newCategoryID == "" {
-			_, execErr = tx.Exec(
+			_, execErr = tx.ExecContext(context.Background(),
 				"UPDATE commands SET position = ?, category_id = NULL WHERE id = ?",
 				i, cmdID,
 			)
 		} else {
-			_, execErr = tx.Exec(
+			_, execErr = tx.ExecContext(context.Background(),
 				"UPDATE commands SET position = ?, category_id = ? WHERE id = ?",
 				i, newCategoryID, cmdID,
 			)
@@ -842,7 +915,7 @@ func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex in
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (db *DB) saveTags(tx *sql.Tx, commandID string, tags []string) error {
@@ -852,12 +925,12 @@ func (db *DB) saveTags(tx *sql.Tx, commandID string, tags []string) error {
 			continue
 		}
 		// Upsert tag
-		_, err := tx.Exec("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
+		_, err := tx.ExecContext(context.Background(), "INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
 		if err != nil {
 			return fmt.Errorf("upsert tag: %w", err)
 		}
 		// Link
-		_, err = tx.Exec(
+		_, err = tx.ExecContext(context.Background(),
 			"INSERT OR IGNORE INTO command_tags (command_id, tag_id) SELECT ?, id FROM tags WHERE name = ?",
 			commandID, tag,
 		)
@@ -870,9 +943,15 @@ func (db *DB) saveTags(tx *sql.Tx, commandID string, tags []string) error {
 
 func (db *DB) saveVariables(tx *sql.Tx, commandID string, vars []VariableDefinition) error {
 	for i, v := range vars {
-		_, err := tx.Exec(
+		_, err := tx.ExecContext(
+			context.Background(),
 			"INSERT INTO variable_definitions (command_id, name, description, example, default_expr, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-			commandID, v.Name, v.Description, v.Example, v.Default, i,
+			commandID,
+			v.Name,
+			v.Description,
+			v.Example,
+			v.Default,
+			i,
 		)
 		if err != nil {
 			return fmt.Errorf("insert variable %s: %w", v.Name, err)
@@ -886,7 +965,10 @@ func (db *DB) saveVariables(tx *sql.Tx, commandID string, vars []VariableDefinit
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetPresets(commandID string) ([]VariablePreset, error) {
-	rows, err := db.conn.Query("SELECT id, name, position FROM variable_presets WHERE command_id = ? ORDER BY position, name", commandID)
+	rows, err := db.conn.QueryContext(context.Background(),
+		"SELECT id, name, position FROM variable_presets WHERE command_id = ? ORDER BY position, name",
+		commandID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query presets: %w", err)
 	}
@@ -900,19 +982,25 @@ func (db *DB) GetPresets(commandID string) ([]VariablePreset, error) {
 		}
 		p.Values = map[string]string{}
 
-		valRows, err := db.conn.Query("SELECT variable_name, value FROM preset_values WHERE preset_id = ?", p.ID)
+		// Closed explicitly (not deferred): this runs inside the rows loop
+		// above, so deferring would keep one Rows open per preset until return.
+		valRows, err := db.conn.QueryContext(
+			context.Background(),
+			"SELECT variable_name, value FROM preset_values WHERE preset_id = ?",
+			p.ID,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("query preset values: %w", err)
 		}
 		for valRows.Next() {
 			var k, v string
 			if err := valRows.Scan(&k, &v); err != nil {
-				valRows.Close()
+				_ = valRows.Close() //nolint:sqlclosecheck // see comment above the query
 				return nil, fmt.Errorf("scan preset value: %w", err)
 			}
 			p.Values[k] = v
 		}
-		valRows.Close()
+		_ = valRows.Close() //nolint:sqlclosecheck // see comment above the query
 		if err := valRows.Err(); err != nil {
 			return nil, err
 		}
@@ -923,25 +1011,35 @@ func (db *DB) GetPresets(commandID string) ([]VariablePreset, error) {
 }
 
 func (db *DB) SavePreset(commandID string, preset VariablePreset) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var maxPos int
-	_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM variable_presets WHERE command_id = ?", commandID).Scan(&maxPos)
+	_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM variable_presets WHERE command_id = ?", commandID).
+		Scan(&maxPos)
 
-	_, err = tx.Exec("INSERT INTO variable_presets (id, command_id, name, position) VALUES (?, ?, ?, ?)",
-		preset.ID, commandID, preset.Name, maxPos+1,
+	_, err = tx.ExecContext(
+		context.Background(),
+		"INSERT INTO variable_presets (id, command_id, name, position) VALUES (?, ?, ?, ?)",
+		preset.ID,
+		commandID,
+		preset.Name,
+		maxPos+1,
 	)
 	if err != nil {
 		return fmt.Errorf("insert preset: %w", err)
 	}
 
 	for k, v := range preset.Values {
-		_, err = tx.Exec("INSERT INTO preset_values (preset_id, variable_name, value) VALUES (?, ?, ?)",
-			preset.ID, k, v,
+		_, err = tx.ExecContext(
+			context.Background(),
+			"INSERT INTO preset_values (preset_id, variable_name, value) VALUES (?, ?, ?)",
+			preset.ID,
+			k,
+			v,
 		)
 		if err != nil {
 			return fmt.Errorf("insert preset value: %w", err)
@@ -952,13 +1050,18 @@ func (db *DB) SavePreset(commandID string, preset VariablePreset) error {
 }
 
 func (db *DB) UpdatePreset(preset VariablePreset) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.Exec("UPDATE variable_presets SET name = ? WHERE id = ?", preset.Name, preset.ID)
+	res, err := tx.ExecContext(
+		context.Background(),
+		"UPDATE variable_presets SET name = ? WHERE id = ?",
+		preset.Name,
+		preset.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("update preset: %w", err)
 	}
@@ -968,12 +1071,20 @@ func (db *DB) UpdatePreset(preset VariablePreset) error {
 	}
 
 	// Replace values
-	if _, err := tx.Exec("DELETE FROM preset_values WHERE preset_id = ?", preset.ID); err != nil {
+	if _, err := tx.ExecContext(
+		context.Background(),
+		"DELETE FROM preset_values WHERE preset_id = ?",
+		preset.ID,
+	); err != nil {
 		return fmt.Errorf("delete old preset values: %w", err)
 	}
 	for k, v := range preset.Values {
-		_, err = tx.Exec("INSERT INTO preset_values (preset_id, variable_name, value) VALUES (?, ?, ?)",
-			preset.ID, k, v,
+		_, err = tx.ExecContext(
+			context.Background(),
+			"INSERT INTO preset_values (preset_id, variable_name, value) VALUES (?, ?, ?)",
+			preset.ID,
+			k,
+			v,
 		)
 		if err != nil {
 			return fmt.Errorf("insert preset value: %w", err)
@@ -984,7 +1095,7 @@ func (db *DB) UpdatePreset(preset VariablePreset) error {
 }
 
 func (db *DB) DeletePreset(presetID string) error {
-	res, err := db.conn.Exec("DELETE FROM variable_presets WHERE id = ?", presetID)
+	res, err := db.conn.ExecContext(context.Background(), "DELETE FROM variable_presets WHERE id = ?", presetID)
 	if err != nil {
 		return fmt.Errorf("delete preset: %w", err)
 	}
@@ -996,14 +1107,19 @@ func (db *DB) DeletePreset(presetID string) error {
 }
 
 func (db *DB) ReorderPresets(commandID string, presetIDs []string) error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for i, id := range presetIDs {
-		if _, err := tx.Exec("UPDATE variable_presets SET position = ? WHERE id = ? AND command_id = ?", i, id, commandID); err != nil {
+		if _, err := tx.ExecContext(context.Background(),
+			"UPDATE variable_presets SET position = ? WHERE id = ? AND command_id = ?",
+			i,
+			id,
+			commandID,
+		); err != nil {
 			return fmt.Errorf("reorder preset: %w", err)
 		}
 	}
@@ -1016,7 +1132,8 @@ func (db *DB) ReorderPresets(commandID string, presetIDs []string) error {
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetExecutions() ([]ExecutionRecord, error) {
-	rows, err := db.conn.Query(
+	rows, err := db.conn.QueryContext(
+		context.Background(),
 		"SELECT id, command_id, script_content, final_cmd, output, error, exit_code, working_dir, executed_at FROM executions ORDER BY executed_at DESC",
 	)
 	if err != nil {
@@ -1027,7 +1144,17 @@ func (db *DB) GetExecutions() ([]ExecutionRecord, error) {
 	records := []ExecutionRecord{}
 	for rows.Next() {
 		var r ExecutionRecord
-		if err := rows.Scan(&r.ID, &r.CommandID, &r.ScriptContent, &r.FinalCmd, &r.Output, &r.Error, &r.ExitCode, &r.WorkingDir, &r.ExecutedAt); err != nil {
+		if err := rows.Scan(
+			&r.ID,
+			&r.CommandID,
+			&r.ScriptContent,
+			&r.FinalCmd,
+			&r.Output,
+			&r.Error,
+			&r.ExitCode,
+			&r.WorkingDir,
+			&r.ExecutedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan execution: %w", err)
 		}
 		records = append(records, r)
@@ -1036,9 +1163,18 @@ func (db *DB) GetExecutions() ([]ExecutionRecord, error) {
 }
 
 func (db *DB) AddExecution(record ExecutionRecord) error {
-	_, err := db.conn.Exec(
+	_, err := db.conn.ExecContext(
+		context.Background(),
 		"INSERT INTO executions (id, command_id, script_content, final_cmd, output, error, exit_code, working_dir, executed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		record.ID, record.CommandID, record.ScriptContent, record.FinalCmd, record.Output, record.Error, record.ExitCode, record.WorkingDir, record.ExecutedAt,
+		record.ID,
+		record.CommandID,
+		record.ScriptContent,
+		record.FinalCmd,
+		record.Output,
+		record.Error,
+		record.ExitCode,
+		record.WorkingDir,
+		record.ExecutedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert execution: %w", err)
@@ -1047,7 +1183,7 @@ func (db *DB) AddExecution(record ExecutionRecord) error {
 }
 
 func (db *DB) ClearExecutions() error {
-	_, err := db.conn.Exec("DELETE FROM executions")
+	_, err := db.conn.ExecContext(context.Background(), "DELETE FROM executions")
 	if err != nil {
 		return fmt.Errorf("clear executions: %w", err)
 	}
@@ -1065,7 +1201,8 @@ func (db *DB) SearchCommands(query string) ([]Command, error) {
 	}
 
 	// Try FTS5 first
-	rows, err := db.conn.Query(
+	rows, err := db.conn.QueryContext(
+		context.Background(),
 		`SELECT c.id, c.title, c.description, c.script_content, c.category_id, c.position, c.created_at, c.updated_at, c.working_dir
 		 FROM commands_fts fts
 		 JOIN commands c ON c.rowid = fts.rowid
@@ -1084,7 +1221,17 @@ func (db *DB) SearchCommands(query string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -1107,7 +1254,7 @@ func (db *DB) SearchCommands(query string) ([]Command, error) {
 
 func (db *DB) searchCommandsLike(query string) ([]Command, error) {
 	like := "%" + query + "%"
-	rows, err := db.conn.Query(
+	rows, err := db.conn.QueryContext(context.Background(),
 		`SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir
 		 FROM commands
 		 WHERE title LIKE ? OR description LIKE ? OR script_content LIKE ?
@@ -1124,7 +1271,17 @@ func (db *DB) searchCommandsLike(query string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan like result: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -1163,10 +1320,10 @@ func (db *DB) GetSettings() (AppSettings, error) {
 	defaults.WindowHeight = &h
 
 	var raw string
-	err := db.conn.QueryRow(`SELECT data FROM app_settings LIMIT 1`).Scan(&raw)
-	if err == sql.ErrNoRows {
+	err := db.conn.QueryRowContext(context.Background(), `SELECT data FROM app_settings LIMIT 1`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
 		data, _ := json.Marshal(defaults)
-		_, err = db.conn.Exec(`INSERT INTO app_settings (data) VALUES (?)`, string(data))
+		_, err = db.conn.ExecContext(context.Background(), `INSERT INTO app_settings (data) VALUES (?)`, string(data))
 		if err != nil {
 			return defaults, fmt.Errorf("insert default settings: %w", err)
 		}
@@ -1218,8 +1375,8 @@ func (db *DB) SetSettings(s AppSettings) error {
 	}
 	// nil means "don't touch this field"; a non-nil (possibly empty) map means "apply/update/clear".
 	if s.DefaultWorkingDir != nil {
-		copy := *s.DefaultWorkingDir
-		existing.DefaultWorkingDir = &copy
+		wd := *s.DefaultWorkingDir
+		existing.DefaultWorkingDir = &wd
 	}
 	if s.WindowX != nil {
 		existing.WindowX = s.WindowX
@@ -1238,7 +1395,7 @@ func (db *DB) SetSettings(s AppSettings) error {
 	if err != nil {
 		return fmt.Errorf("marshal settings: %w", err)
 	}
-	_, err = db.conn.Exec(`UPDATE app_settings SET data = ?`, string(data))
+	_, err = db.conn.ExecContext(context.Background(), `UPDATE app_settings SET data = ?`, string(data))
 	if err != nil {
 		return fmt.Errorf("update settings: %w", err)
 	}
@@ -1247,11 +1404,11 @@ func (db *DB) SetSettings(s AppSettings) error {
 
 // ResetAll deletes all user data and recreates the default settings row.
 func (db *DB) ResetAll() error {
-	tx, err := db.conn.Begin()
+	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	tables := []string{
 		"preset_values",
@@ -1265,7 +1422,8 @@ func (db *DB) ResetAll() error {
 		"app_settings",
 	}
 	for _, t := range tables {
-		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
+		query := "DELETE FROM " + t //nolint:gosec // G202: table name is a fixed literal, not user input
+		if _, err := tx.ExecContext(context.Background(), query); err != nil {
 			return fmt.Errorf("clear %s: %w", t, err)
 		}
 	}
@@ -1273,12 +1431,25 @@ func (db *DB) ResetAll() error {
 	defaultSettingsX, defaultSettingsY := -1, -1
 	defaultSettingsW, defaultSettingsH := 640, 520
 	defaultSettings, _ := json.Marshal(AppSettings{
-		Locale: "en", Terminal: "", Theme: "vscode-dark",
-		LastDarkTheme: "vscode-dark", LastLightTheme: "vscode-light",
-		CustomThemes: "[]", UIFont: "Inter", MonoFont: "JetBrains Mono", Density: "comfortable",
-		WindowX: &defaultSettingsX, WindowY: &defaultSettingsY, WindowWidth: &defaultSettingsW, WindowHeight: &defaultSettingsH,
+		Locale:         "en",
+		Terminal:       "",
+		Theme:          "vscode-dark",
+		LastDarkTheme:  "vscode-dark",
+		LastLightTheme: "vscode-light",
+		CustomThemes:   "[]",
+		UIFont:         "Inter",
+		MonoFont:       "JetBrains Mono",
+		Density:        "comfortable",
+		WindowX:        &defaultSettingsX,
+		WindowY:        &defaultSettingsY,
+		WindowWidth:    &defaultSettingsW,
+		WindowHeight:   &defaultSettingsH,
 	})
-	if _, err := tx.Exec(`INSERT INTO app_settings (data) VALUES (?)`, string(defaultSettings)); err != nil {
+	if _, err := tx.ExecContext(
+		context.Background(),
+		`INSERT INTO app_settings (data) VALUES (?)`,
+		string(defaultSettings),
+	); err != nil {
 		return fmt.Errorf("insert default settings: %w", err)
 	}
 
@@ -1286,7 +1457,7 @@ func (db *DB) ResetAll() error {
 		return fmt.Errorf("commit reset: %w", err)
 	}
 
-	_, _ = db.conn.Exec("VACUUM")
+	_, _ = db.conn.ExecContext(context.Background(), "VACUUM")
 	return nil
 }
 

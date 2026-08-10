@@ -1,25 +1,93 @@
 # Wails Server Mode Dockerfile
-# Multi-stage build for minimal image size
+# Multi-stage build for a minimal image that can still execute user scripts.
+#
+# Defaults produce a pure-Go, fully static binary on a slim Debian runtime that
+# includes /bin/bash (and the usual shell utilities scripts need). Distroless
+# images are intentionally not used — this app's purpose is running
+# user-supplied bash, so the runtime must ship a shell.
+#
+# If your app needs CGO, override the build args, e.g.:
+#   docker build --build-arg CGO_ENABLED=1 \
+#                --build-arg GO_IMAGE=golang:bookworm \
+#                --build-arg RUNTIME_IMAGE=debian:bookworm-slim \
+#                -f build/docker/Dockerfile.server .
+# CGO needs a C toolchain in the builder and a libc in the runtime image; keep
+# the builder and runtime libc compatible (a glibc builder -> a glibc runtime).
+# The image still runs as non-root via USER below — keep that when overriding
+# RUNTIME_IMAGE. The Taskfile passes these through:
+#   task build:docker CGO_ENABLED=1 GO_IMAGE=... RUNTIME_IMAGE=...
+
+ARG GO_IMAGE=golang:1.26-alpine
+ARG RUNTIME_IMAGE=debian:bookworm-slim
+ARG CGO_ENABLED=0
 
 # Build stage
-FROM golang:1.25-bookworm AS builder
+FROM ${GO_IMAGE} AS builder
+ARG CGO_ENABLED
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache git
+# Install build dependencies: git always; a C compiler only when CGO is enabled.
+# Supports both apk (alpine) and apt (debian/bookworm) base images.
+RUN if command -v apk >/dev/null 2>&1; then \
+        apk add --no-cache git $([ "$CGO_ENABLED" = "1" ] && echo gcc musl-dev); \
+    else \
+        apt-get update && apt-get install -y --no-install-recommends git $([ "$CGO_ENABLED" = "1" ] && echo gcc libc6-dev) && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Copy source code
 COPY . .
 
-# Download dependencies from committed go.sum
+# Remove only local-path replace directives (./, ../, or absolute /…), for
+# production builds. Preserves module→module replacements. Handles both
+# single-line (`replace foo => ./bar`) and block-form (`replace (\n...\n)`)
+# so a block doesn't leave an orphaned body, empty replace (), or ")" behind.
+RUN awk '\
+    function is_local(p) { return (p ~ /^\.\// || p ~ /^\.\.\// || p ~ /^\//) } \
+    function after_arrow(line,   idx, rest, n, a) { \
+        idx = index(line, "=>"); \
+        if (idx == 0) return ""; \
+        rest = substr(line, idx + 2); \
+        gsub(/^[[:space:]]+/, "", rest); \
+        n = split(rest, a, /[[:space:]]+/); \
+        if (n < 1) return ""; \
+        return a[1]; \
+    } \
+    /^replace[[:space:]]*\(/ { \
+        inblock = 1; kept = 0; buf = ""; next \
+    } \
+    inblock && /^[[:space:]]*\)[[:space:]]*$/ { \
+        if (kept) { print "replace ("; printf "%s", buf; print ")" } \
+        inblock = 0; next \
+    } \
+    inblock { \
+        if ($0 ~ /^[[:space:]]*$/) next; \
+        rhs = after_arrow($0); \
+        if (rhs != "" && is_local(rhs)) next; \
+        buf = buf $0 "\n"; kept = 1; next \
+    } \
+    /^replace[[:space:]]/ { \
+        rhs = after_arrow($0); \
+        if (rhs != "" && is_local(rhs)) next; \
+        print; next \
+    } \
+    { print } \
+    ' go.mod > go.mod.tmp && mv go.mod.tmp go.mod
+
+# Download dependencies, verified against the committed go.sum (reproducible;
+# unlike `go mod tidy`, this does not resolve the module graph from the
+# network or rewrite go.mod/go.sum inside the build).
 RUN go mod download
 
-# Build the server binary
-RUN go build -tags server -ldflags="-s -w" -o server .
+# Build the production server binary.
+# - server,production tags: HTTP server mode with production code paths (no dev
+#   logger/asset middleware), matching the desktop production build.
+# - CGO_ENABLED defaults to 0 for a fully static binary;
+#   override with --build-arg CGO_ENABLED=1 (see header) for CGO apps.
+RUN CGO_ENABLED=${CGO_ENABLED} go build -tags server,production -trimpath -buildvcs=false -ldflags="-s -w" -o server .
 
-# Runtime stage - minimal image
-FROM gcr.io/distroless/static-debian12:nonroot
+# Runtime stage — slim Debian with bash for user-script execution
+FROM ${RUNTIME_IMAGE}
 
 # Copy the binary
 COPY --from=builder /app/server /server
@@ -34,6 +102,10 @@ EXPOSE 8080
 # Can be overridden at runtime with -e WAILS_SERVER_HOST=...
 ENV WAILS_SERVER_HOST=0.0.0.0
 
-# Run the server as non-root
-USER 65534:65534
+# Run as non-root. Numeric UID:GID (not a username) so this still resolves
+# even if RUNTIME_IMAGE has no matching passwd entry — 65532 matches the
+# common nonroot convention.
+USER 65532:65532
+
+# Run the server
 ENTRYPOINT ["/server"]

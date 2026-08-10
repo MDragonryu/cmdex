@@ -4,7 +4,7 @@
 
 ## Overview
 
-CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 18 + TypeScript** frontend. All data is stored locally in an **SQLite** database with no external services or cloud dependencies.
+CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 19.2.7 + TypeScript** frontend. All data is stored locally in an **SQLite** database with no external services or cloud dependencies.
 
 The app follows a service-oriented architecture on the backend, where discrete Wails v3 services expose domain-specific operations (commands, execution, settings, import/export) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with tab-based command editing, a searchable sidebar, streaming output panes, and a separate settings window.
 
@@ -16,7 +16,7 @@ The app follows a service-oriented architecture on the backend, where discrete W
 ┌─────────────────────────────────────────────────────────────┐
 │                      CmDex Desktop App                       │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              React 18 + Vite Frontend                  │  │
+│  │           React 19.2.7 + Vite Frontend                │  │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  │  │
 │  │  │   Sidebar   │  │ Command Tabs │  │ Output Panes │  │  │
 │  │  │  (Search)   │  │  (Editor)    │  │ (Streaming)  │  │  │
@@ -106,7 +106,7 @@ CmDex registers six Wails v3 services in `main.go`:
 
 ### Technology Stack
 
-- **Framework:** React 18 with TypeScript
+- **Framework:** React 19.2.7 with TypeScript
 - **Build Tool:** Vite
 - **UI Components:** shadcn/ui (built on Radix UI primitives + Tailwind CSS)
 - **State Management:** React `useState` and `useRef` (no external state library)
@@ -115,10 +115,10 @@ CmDex registers six Wails v3 services in `main.go`:
 
 ### Application Entry (`main.tsx`)
 
-The frontend is a single Vite bundle that renders two distinct UIs based on the URL:
+The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a **simple bundle** (no vendor code-splitting for size warnings) and only lazy-loads heavy entry points / features (e.g. `App` vs `SettingsPage`, and the xterm `Terminal`). It renders two UIs based on the URL:
 
-- **Main Window** (`/` or no query param) — Renders the primary `<App />` component.
-- **Settings Window** (`/?window=settings`) — Renders a dedicated `<SettingsWindow />` component that loads and persists preferences independently, then emits `settingsChanged` events back to the main window.
+- **Main Window** (`/` or no query param) — Lazily loads the primary `<App />` component.
+- **Settings Window** (`/?window=settings`) — Lazily loads `<SettingsPage />` inside a dedicated settings window that persists preferences independently, then emits `settingsChanged` events back to the main window.
 
 ### Main App Structure (`App.tsx`)
 
@@ -322,7 +322,7 @@ cmdex/
 │   ├── index.html
 │   ├── vite.config.ts
 │   ├── tsconfig.json
-│   └── package.json            # pnpm-based; React 18, Vite, Tailwind, shadcn/ui
+│   └── package.json            # pnpm-based; React 19.2.7, Vite, Tailwind, shadcn/ui
 │
 └── .planning/
     └── docs/
