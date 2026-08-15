@@ -28,7 +28,7 @@ No build tools, no terminal setup — just download, install, and start saving c
 > **macOS users:** Because CmDex is not signed with an Apple Developer certificate, macOS may show a security warning on first launch. If you see *"CmDex can't be opened because it was not downloaded from the App Store"* or a quarantine dialog, run this in Terminal:
 >
 > ```bash
-> xattr -d com.apple.quarantine /Applications/CmDex.app
+> xattr -d com.apple.quarantine /Applications/cmdex.app
 > ```
 >
 > Then relaunch the app.
