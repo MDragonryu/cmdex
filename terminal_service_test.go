@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -38,11 +39,14 @@ func TestTerminalDetectShell(t *testing.T) {
 	}
 
 	if runtime.GOOS == "windows" {
+		// pwsh/powershell resolve to an absolute path via exec.LookPath; only
+		// the cmd fallback is returned as a bare name. Compare basenames.
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".exe"))
 		validShells := map[string]bool{"pwsh": true, "powershell": true, "cmd": true}
-		if !validShells[path] {
+		if !validShells[base] {
 			t.Errorf("unexpected Windows shell path: %s", path)
 		}
-		if path == "cmd" && flag != "" {
+		if base == "cmd" && flag != "" {
 			t.Errorf("cmd shell should have empty flag, got: %s", flag)
 		}
 	} else {
@@ -98,10 +102,10 @@ func TestTerminalStart(t *testing.T) {
 	if ss.ptmx == nil {
 		t.Fatal("ptmx is nil after Start")
 	}
-	if ss.cmd == nil {
-		t.Fatal("cmd is nil after Start")
+	if ss.proc == nil {
+		t.Fatal("proc is nil after Start")
 	}
-	if ss.cmd.Process == nil {
+	if ss.proc.Pid() == 0 {
 		t.Fatal("process is nil after Start")
 	}
 }
@@ -150,6 +154,10 @@ func TestTerminalShutdown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: calls ptyStart directly with Unix shell syntax (\"-c\", \"sleep 60\") — " +
+			"not a stub limitation, this test is inherently Unix-specific")
+	}
 
 	shellPath, shellFlag := detectShell()
 
@@ -173,15 +181,17 @@ func TestTerminalShutdown(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", c.Dir, wantDir)
 	}
 
+	execProc := newExecProcess(c)
+
 	ss.mu.Lock()
 	ss.ptmx = ptmx
-	ss.cmd = c
+	ss.proc = execProc
 	ss.stopCh = make(chan struct{})
 	ss.running = true
-	pid := ss.cmd.Process.Pid
+	pid := execProc.Pid()
 	ss.mu.Unlock()
 
-	proc, err := os.FindProcess(pid)
+	osProc, err := os.FindProcess(pid)
 	if err != nil {
 		t.Fatalf("FindProcess failed: %v", err)
 	}
@@ -193,11 +203,11 @@ func TestTerminalShutdown(t *testing.T) {
 	if ss.ptmx != nil {
 		t.Error("ptmx not cleared after Stop")
 	}
-	if ss.cmd != nil {
-		t.Error("cmd not cleared after Stop")
+	if ss.proc != nil {
+		t.Error("proc not cleared after Stop")
 	}
 
-	err = proc.Signal(syscall.Signal(0))
+	err = osProc.Signal(syscall.Signal(0))
 	if err == nil {
 		t.Error("process still running after Stop")
 	}
@@ -238,6 +248,10 @@ func TestTerminalExit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: calls ptyStart directly with Unix shell syntax (\"-c\", \"exit 0\") — " +
+			"not a stub limitation, this test is inherently Unix-specific")
+	}
 
 	s := newTestTerminalService(t)
 	id := mustCreateAndStart(t, s)
@@ -256,23 +270,29 @@ func TestTerminalExit(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, wantDir)
 	}
 
+	execProc := newExecProcess(cmd)
+
 	ss.mu.Lock()
 	ss.shellPath = shellPath
 	ss.shellFlag = shellFlag
 	ss.lastSize = ptyWinsize{Rows: 24, Cols: 80}
 	ss.ptmx = ptmx
-	ss.cmd = cmd
+	ss.proc = execProc
 	ss.stopCh = make(chan struct{})
 	ss.running = true
 	ss.mu.Unlock()
 
-	_ = cmd.Wait()
+	// Wait via the same execProcess wrapper monitorExit uses below — this
+	// exercises the sync.Once-guarded Wait (see execProcess in pty_backend.go)
+	// that lets both callers observe the same single physical cmd.Wait() call
+	// instead of racing two separate calls on the same *exec.Cmd.
+	_, _ = execProc.Wait()
 	ptmx.Close()
 
-	go s.monitorExit(ss, cmd, ptmx, ss.stopCh)
+	go s.monitorExit(ss, execProc, ss.stopCh)
 	defer s.Stop(id)
 
-	if cmd.ProcessState == nil {
+	if !execProc.Exited() {
 		t.Error("process state is nil after shell exit")
 	}
 }

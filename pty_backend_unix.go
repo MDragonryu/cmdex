@@ -25,12 +25,12 @@ type creackPtyBackend struct{}
 
 // Start spawns a shell attached to a new PTY, returning an io.ReadWriteCloser
 // handle for the PTY master.
-func (creackPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+func (creackPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
 	ptmx, cmd, err := ptyStart(shellPath, shellFlag, dir, rows, cols)
 	if err != nil {
 		return nil, nil, err
 	}
-	return osFileHandle{f: ptmx}, cmd, nil
+	return osFileHandle{f: ptmx}, newExecProcess(cmd), nil
 }
 
 // Resize updates the PTY window size.
@@ -42,9 +42,13 @@ func (creackPtyBackend) Resize(handle ptyHandle, cols, rows int) error {
 	return ptyResize(oh.f, cols, rows)
 }
 
-// Kill terminates the process group associated with cmd.
-func (creackPtyBackend) Kill(cmd *exec.Cmd) error {
-	return killProcessGroup(cmd)
+// Kill terminates the process group associated with proc.
+func (creackPtyBackend) Kill(proc ptyProcess) error {
+	ep, ok := proc.(*execProcess)
+	if !ok || ep == nil {
+		return nil
+	}
+	return killProcessGroup(ep)
 }
 
 // osFileHandle adapts a *os.File (creack/pty's PTY master) to ptyHandle.
@@ -98,49 +102,31 @@ func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...str
 	return ptmx, cmd, nil
 }
 
-// resolvePtyWorkingDir returns dir if it exists and is a directory, falling
-// back to the OS user home directory, then to "" (inherit the app's cwd) if
-// neither is usable. This is a best-effort pre-check only — ptyStart still
-// retries without a working directory if the chosen one fails at exec time
-// (deleted between check and use, or missing execute permission) — but it
-// keeps the common case (a stale/deleted configured working directory) from
-// needing that fallback path. e.g. getWorkingDir() can return a
-// saved-but-now-missing custom path, or "" if os.UserHomeDir() itself
-// failed.
-func resolvePtyWorkingDir(dir string) string {
-	if dir != "" {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if info, err := os.Stat(home); err == nil && info.IsDir() {
-			return home
-		}
-	}
-	return ""
-}
-
 func ptyResize(ptmx *os.File, cols, rows int) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 }
 
-func killProcessGroup(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
+// killProcessGroup sends SIGHUP to proc's process group, then escalates to
+// SIGKILL if it hasn't exited within ptyKillTimeout. It waits for exit via
+// proc.Wait() rather than calling cmd.Wait() directly — proc.Wait() is
+// shared with monitorExit's own wait via execProcess's sync.Once, so the two
+// never race calling cmd.Wait() on the same *exec.Cmd (see execProcess).
+func killProcessGroup(proc *execProcess) error {
+	if proc == nil || proc.cmd.Process == nil {
 		return nil
 	}
 
-	pid := cmd.Process.Pid
+	pid := proc.cmd.Process.Pid
 
 	_ = syscall.Kill(-pid, syscall.SIGHUP)
 
-	if cmd.ProcessState != nil {
+	if proc.Exited() {
 		return nil
 	}
 
 	done := make(chan struct{}, 1)
 	go func() {
-		_ = cmd.Wait()
+		_, _ = proc.Wait()
 		done <- struct{}{}
 	}()
 
