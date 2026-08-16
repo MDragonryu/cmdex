@@ -1025,7 +1025,10 @@ function App() {
     }, []);
 
     const runCommandDirect = useCallback(async (commandId: string, variables: Record<string, string>) => {
-        const execTabId = activeTabIdRef.current;
+        // The tab this execution belongs to is the command being run, not whatever
+        // tab happens to be active right now — those can diverge if the user
+        // switches tabs during an async gap before this fires (see PR #58 review).
+        const execTabId = commandId;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         expandTerminal();
@@ -1117,13 +1120,25 @@ function App() {
     }, []);
 
     const handleVariableSubmit = async (values: Record<string, string>) => {
-        if (!selectedCommand || isNewCommandTabId(selectedCommand.id)) return;
-        if (isSavedCommandDraftDirty(selectedCommand.id)) {
+        // Shared by both the fillVariables and managePresets modals — read the
+        // command id the modal was opened for, not whatever tab is currently
+        // selected. Those can diverge if the user switches tabs while this
+        // modal is still open (see PR #58 review).
+        if (modal.type !== 'fillVariables' && modal.type !== 'managePresets') return;
+        const commandId = modal.commandId;
+        if (isNewCommandTabId(commandId)) return;
+        // The modal retains its commandId across tab closes — bail if that
+        // tab is gone rather than executing against a nonexistent tab.
+        if (!openTabsRef.current.some((t) => t.id === commandId)) {
+            setModal({ type: 'none' });
+            return;
+        }
+        if (isSavedCommandDraftDirty(commandId)) {
             toast.message(t('toast.saveBeforeExecute'));
             return;
         }
         setModal({ type: 'none' });
-        runCommandDirect(selectedCommand.id, values);
+        runCommandDirect(commandId, values);
     };
 
     const handleSavePreset = async (name: string, values: Record<string, string>) => {
@@ -1281,6 +1296,33 @@ function App() {
         openTab(cmd);
     };
 
+    const handlePaletteExecute = useCallback(async (cmd: Command) => {
+        openTab(cmd);
+        const prompts = (await GetVariables(cmd.id)) || [];
+        if (!openTabsRef.current.some((t) => t.id === cmd.id)) return;
+        const values: Record<string, string> = {};
+        let hasEmpty = false;
+        for (const p of prompts) {
+            if (p.defaultValue) {
+                values[p.name] = p.defaultValue;
+            } else {
+                hasEmpty = true;
+            }
+        }
+        // Defer past this render so activeTabIdRef (synced during render,
+        // see useSyncedRef.ts) reflects the tab openTab() just activated —
+        // otherwise runCommandDirect targets the previously active tab.
+        setTimeout(() => {
+            if (!openTabsRef.current.some((t) => t.id === cmd.id)) return;
+            if (hasEmpty) {
+                handleFillVariablesByTab(cmd.id, values);
+            } else {
+                handleExecute(cmd.id, values);
+            }
+        }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
+    }, [openTab, handleFillVariablesByTab, handleExecute]);
+
     /* eslint-disable react-hooks/refs -- keyboard shortcuts use ref-based handlers (not called during render) */
     useKeyboardShortcuts({
         [`${cmdOrCtrl}+p`]: () => setPaletteOpen(true),
@@ -1421,7 +1463,15 @@ function App() {
             if (tabs.length > 0) handleSelectTab(tabs[tabs.length - 1].id);
         },
 
-        ...(paletteOpen ? { escape: () => setPaletteOpen(false) } : {}),
+        ...(paletteOpen ? {
+            escape: () => setPaletteOpen(false),
+            // Let CommandPalette's own onKeyDown handle cmd/ctrl+enter while
+            // open — otherwise this global binding's capture-phase listener
+            // (useKeyboardShortcuts) stops propagation before the palette's
+            // input ever sees the event, even though this handler itself
+            // bails out on input focus and does nothing.
+            [`${cmdOrCtrl}+enter`]: undefined,
+        } : {}),
     });
     /* eslint-enable react-hooks/refs */
 
@@ -1789,6 +1839,7 @@ function App() {
                     categories={categories}
                     onClose={() => setPaletteOpen(false)}
                     onOpen={handleSelectCommand}
+                    onExecute={handlePaletteExecute}
                 />
                 <Toaster position="bottom-right" richColors closeButton duration={3000} />
                 <KeyboardShortcutsDialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen} />
