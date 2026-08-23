@@ -12,6 +12,15 @@ interface TerminalComponentProps {
   isVisible: boolean;
   theme: string;
   sessionId: string;
+  // Whether the backend already reports this session's shell as running at
+  // mount time (e.g. the session TerminalService.ServiceStartup or
+  // CreateSession already spawned). Only consulted once, on mount — see the
+  // startCalledRef effect below. Without this, every mount unconditionally
+  // called Start() even for an already-running session, which tears down
+  // the healthy PTY (startSessionLocked has no "already running" guard, only
+  // a re-entrant "already starting" one) and spawns a brand new shell,
+  // producing a spurious extra shell/prompt on every session mount.
+  initiallyRunning?: boolean;
   onShellExit?: () => void;
 }
 
@@ -23,7 +32,7 @@ export interface TerminalHandle {
 }
 
 const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
-    ({ isVisible, theme, sessionId, onShellExit }, ref) => {
+    ({ isVisible, theme, sessionId, initiallyRunning, onShellExit }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -32,12 +41,16 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const startCalledRef = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const onShellExitRef = useRef(onShellExit);
+  const initiallyRunningRef = useRef(initiallyRunning);
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
   useEffect(() => {
     onShellExitRef.current = onShellExit;
   }, [onShellExit]);
+  useEffect(() => {
+    initiallyRunningRef.current = initiallyRunning;
+  }, [initiallyRunning]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -102,6 +115,12 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
               for (let i = scanFrom; i >= 0; i--) {
                   const line = buffer.getLine(i);
                   if (!line) continue;
+                  // A wrapped row is a continuation of the row above it, never
+                  // the start of a new prompt — testing it against promptRegex
+                  // misfires on echoed command text that happens to wrap and
+                  // end in a prompt-like character (e.g. a long script line
+                  // ending in "$" or ">" when the terminal is narrow).
+                  if (line.isWrapped) continue;
                   if (promptRegex.test(line.translateToString(true).trim())) {
                       found = i;
                       break;
@@ -288,17 +307,26 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
 
     if (!startCalledRef.current) {
       startCalledRef.current = true;
-      requestAnimationFrame(() => {
-        const current = terminalRef.current;
-        if (!current) return;
-        Start(sessionId, current.cols, current.rows).catch((err) => {
-          console.error('terminal start failed:', err);
-          if (backendAvailableRef.current) {
-            backendAvailableRef.current = false;
-            toast.error('Terminal start failed');
-          }
+      // The backend may have already started this session's shell (e.g. the
+      // one TerminalService.ServiceStartup/CreateSession spawns) before this
+      // component ever mounts. startSessionLocked has no "already running"
+      // guard — only a re-entrant "already starting" one — so calling Start
+      // again here would tear down that healthy PTY and spawn a redundant
+      // second shell, showing up as an extra prompt the moment the terminal
+      // tab opens.
+      if (!initiallyRunningRef.current) {
+        requestAnimationFrame(() => {
+          const current = terminalRef.current;
+          if (!current) return;
+          Start(sessionId, current.cols, current.rows).catch((err) => {
+            console.error('terminal start failed:', err);
+            if (backendAvailableRef.current) {
+              backendAvailableRef.current = false;
+              toast.error('Terminal start failed');
+            }
+          });
         });
-      });
+      }
     }
 
     const ptyOutputEvent = 'pty-output:' + sessionId;

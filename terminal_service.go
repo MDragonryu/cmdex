@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,23 +77,72 @@ type sessionState struct {
 	workingDir string
 	createdAt  time.Time
 
-	mu              sync.Mutex
-	ptmx            ptyHandle
-	proc            ptyProcess
-	shellPath       string
-	shellFlag       string
-	lastSize        ptyWinsize
+	mu        sync.Mutex
+	ptmx      ptyHandle
+	proc      ptyProcess
+	shellPath string
+	shellFlag string
+	lastSize  ptyWinsize
+	// oscNonce is the current shell process's OSC-marker nonce (empty if
+	// this session isn't running with shell integration active). Set once
+	// under ss.mu by startSessionLocked before readLoop's goroutine starts,
+	// and read only from that same goroutine (via captureScan) thereafter,
+	// so no further locking is needed — see oscNonceFileEnvVar in
+	// shell_integration.go and stripNonce in terminal_capture.go.
+	oscNonce        string
 	stopCh          chan struct{}
 	running         bool
 	starting        bool
 	intentionalStop bool
 	closed          bool
+	// generation counts how many times Stop/CloseSession have invalidated
+	// this session's current PTY lifecycle. startSessionLocked snapshots it
+	// before unlocking ss.mu for the blocking shell-integration setup and
+	// ptyBackend.Start calls, then compares again once relocked: a bump in
+	// between means Stop or CloseSession ran while this start was in
+	// flight, and the PTY it just spawned must be torn down immediately
+	// rather than resurrecting a session the caller already asked to stop
+	// (see startSessionLocked's staleness check).
+	generation uint64
 
 	readerWg     sync.WaitGroup
 	outputCh     chan string
 	outputSeq    uint64
 	emitterWg    sync.WaitGroup
 	droppedCount atomic.Uint64
+
+	// Capture state for OSC 133 shell-integration markers — see
+	// terminal_capture.go. Guarded by capMu rather than mu: captureScan runs
+	// on the readLoop goroutine without mu held, and GetLastOutput must not
+	// block on session lifecycle operations.
+	//
+	// capCols mirrors lastSize.Cols specifically for captureScan's use: it
+	// needs the current terminal width (to recognize ConPTY's line-wrap
+	// injection artifacts — see removeWrapArtifacts in ansi.go) but runs on
+	// the readLoop goroutine without mu held, while Resize/startSessionLocked
+	// update lastSize.Cols under mu. A plain field read here would race;
+	// this must NOT instead be read from captureScan by taking mu, since
+	// Clear/resetCapture already lock mu THEN capMu — captureScan already
+	// holds capMu at that point, and acquiring mu there too would invert
+	// that ordering and risk deadlock. An independent atomic sidesteps both
+	// problems.
+	capCols atomic.Uint32
+	capMu   sync.Mutex
+	capBuf  bytes.Buffer
+	// capCaptureCols snapshots capCols when a "C" marker opens a capture, so
+	// the "D" marker's stripANSI call uses the width active while THIS
+	// command's output was actually emitted rather than whatever capCols has
+	// drifted to from a Resize that happened mid-command (see captureScan in
+	// terminal_capture.go). Guarded by capMu like the rest of the capture
+	// state, since it's only ever touched from within captureScan/GetLastOutput.
+	capCaptureCols int
+	capCarry       []byte
+	capturing      bool
+	capTruncated   bool
+	lastOutput     string
+	lastExitCode   int
+	lastTruncated  bool
+	lastValid      bool
 }
 
 // TerminalService manages multiple PTY-backed shell sessions.
@@ -102,6 +152,13 @@ type TerminalService struct {
 	activeSessionID string
 	sessionCounter  int
 	ptyBackend      ptyBackend
+
+	// shellIntegrationDir is where the embedded OSC 133 integration scripts
+	// (shell_integration.go) were materialized at ServiceStartup, or "" if
+	// materialization failed — in which case startSessionLocked skips shell
+	// integration entirely and every session behaves exactly as it did
+	// before shell integration existed.
+	shellIntegrationDir string
 }
 
 // info returns the public SessionInfo for this session. Locks ss.mu: Running
@@ -191,6 +248,17 @@ func (s *TerminalService) ServiceStartup(ctx context.Context, options applicatio
 
 	s.sessions = make(map[string]*sessionState)
 	s.ptyBackend = newPtyBackend()
+
+	if dir, err := setupShellIntegrationDir(); err != nil {
+		// Non-fatal: leaves shellIntegrationDir at its zero value "", so
+		// startSessionLocked just skips shell integration for every
+		// session — GetLastOutput reports Available=false and the frontend
+		// falls back to scraping the xterm buffer, same as before this
+		// feature existed.
+		fmt.Printf("TerminalService: shell integration setup failed (graceful degradation): %v\n", err)
+	} else {
+		s.shellIntegrationDir = dir
+	}
 
 	_, err := s.CreateSession()
 	if err != nil {
@@ -304,6 +372,12 @@ func (s *TerminalService) CloseSession(id string) error {
 	// Snapshot PTY resources under lock before releasing.
 	ss.mu.Lock()
 	ss.stopSessionLocked()
+	// Invalidates any startSessionLocked call currently unlocked and
+	// mid-flight (shell-integration setup, ptyBackend.Start) for this
+	// session, so it discards whatever PTY it spawns instead of publishing
+	// it into a session we're about to remove — see the generation field's
+	// comment and startSessionLocked's staleness check.
+	ss.generation++
 	oldPtmx := ss.ptmx
 	oldProc := ss.proc
 	ss.ptmx = nil
@@ -378,6 +452,10 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		return nil
 	}
 	ss.starting = true
+	// Snapshotted before unlocking below for the blocking shell-integration
+	// setup and ptyBackend.Start calls — see the staleness check once
+	// relocked, and the generation field's own comment for why this exists.
+	startGen := ss.generation
 
 	// Clamp minimum dimensions.
 	if cols < minTerminalCols {
@@ -402,20 +480,90 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	// CRITICAL: unlock before blocking operations to prevent deadlock.
 	ss.mu.Unlock()
 
+	// Activate OSC 133 shell integration when possible: integrationFor may
+	// override shellFlag entirely (bash drops its usual -l — see
+	// shell_integration.go) as well as add args/env, so launchFlag/opts,
+	// not shellFlag, are what actually get passed to ptyBackend.Start. This
+	// runs unlocked: shellIntegrationEnabled() takes a blocking DB
+	// round-trip, and nothing here touches session state that needs ss.mu.
+	launchFlag := shellFlag
+	var opts shellLaunchOpts
+	integrated := false
+	var nonce string
+	var nonceFileCleanup func()
+	if s.shellIntegrationDir != "" && shellIntegrationEnabled() {
+		if n, nErr := generateOSCNonce(); nErr == nil {
+			if nonceFile, cleanup, fErr := writeNonceFile(n); fErr == nil {
+				if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir, nonceFile); ok {
+					launchFlag = flag
+					opts = sOpts
+					integrated = true
+					nonce = n
+					nonceFileCleanup = cleanup
+				} else {
+					cleanup()
+				}
+			} else {
+				fmt.Println("Shell integration disabled for this session, could not write OSC nonce file:", fErr)
+			}
+		} else {
+			fmt.Println("Shell integration disabled for this session, could not generate OSC nonce:", nErr)
+		}
+	}
+
 	s.releaseOldProcess(ss, oldPtmx, oldProc)
 
-	handle, proc, err := s.ptyBackend.Start(shellPath, shellFlag, ss.workingDir, rows, cols)
+	// Only safe to reset capture state once the previous session's readLoop
+	// goroutine has actually exited (releaseOldProcess just joined it above)
+	// — otherwise a straggling captureScan from the dying goroutine's final
+	// read (or its stopCh leftover flush) can repopulate stale capture state
+	// for the new session right after it was cleared.
+	ss.resetCapture()
+
+	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
 
 	ss.mu.Lock()
 	ss.starting = false
 
-	if err != nil {
+	// Stop or CloseSession bumped ss.generation while we were unlocked
+	// above — the caller already asked to stop this session, so the PTY
+	// ptyBackend.Start just spawned (if it succeeded at all) must be torn
+	// down immediately rather than being published as ss.ptmx/ss.proc:
+	// without this check, it would silently resurrect a session the app no
+	// longer tracks (CloseSession may have already removed it from
+	// s.sessions), leaking a real shell process and its would-be
+	// readLoop/monitorExit goroutines with no way to ever stop them again.
+	if stale := ss.generation != startGen; stale || err != nil {
+		ss.mu.Unlock()
+		if nonceFileCleanup != nil {
+			nonceFileCleanup()
+		}
+		if err == nil {
+			_ = handle.Close()
+			if !proc.Exited() {
+				_ = s.ptyBackend.Kill(proc)
+			}
+		}
+		ss.mu.Lock()
+		if stale {
+			return errors.New("session stopped while starting")
+		}
 		return err
+	}
+
+	// The integration script deletes the nonce file itself within
+	// milliseconds of shell startup (see oscNonceFileEnvVar) — this is only
+	// the fail-safe path, for the shell crashing before running its
+	// startup files or some other abnormal case.
+	if nonceFileCleanup != nil {
+		time.AfterFunc(nonceFileCleanupGrace, nonceFileCleanup)
 	}
 
 	ss.shellPath = shellPath
 	ss.shellFlag = shellFlag
+	ss.oscNonce = nonce
 	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
+	ss.capCols.Store(uint32(cols))
 	ss.ptmx = handle
 	ss.proc = proc
 	ss.stopCh = make(chan struct{})
@@ -423,7 +571,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 
 	stopCh := ss.stopCh
 	ss.readerWg.Add(1)
-	go ss.readLoop(handle, stopCh)
+	go ss.readLoop(handle, stopCh, integrated)
 	go s.monitorExit(ss, proc, stopCh)
 
 	return nil
@@ -453,8 +601,13 @@ func (s *TerminalService) releaseOldProcess(ss *sessionState, oldPtmx ptyHandle,
 	ss.readerWg.Wait()
 }
 
-// readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to enqueueOutput.
-func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
+// readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to
+// enqueueOutput. captureActive is a per-invocation snapshot (not read live
+// off ss) of whether this session's shell was actually launched with OSC 133
+// integration — sessions on an unrecognized shell, or with the setting
+// disabled, never emit markers, so skipping captureScan entirely avoids
+// taking capMu and scanning every chunk for ESC bytes for no benefit.
+func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}, captureActive bool) {
 	defer ss.readerWg.Done()
 
 	buf := make([]byte, readBufferSize)
@@ -464,6 +617,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		select {
 		case <-stopCh:
 			if len(leftover) > 0 {
+				if captureActive {
+					ss.captureScan(leftover)
+				}
 				ss.enqueueOutput(string(leftover))
 			}
 			return
@@ -473,6 +629,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		n, err := ptmx.Read(buf)
 		if err != nil {
 			if len(leftover) > 0 {
+				if captureActive {
+					ss.captureScan(leftover)
+				}
 				ss.enqueueOutput(string(leftover))
 			}
 			return
@@ -508,6 +667,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		}
 
 		if len(data) > 0 {
+			if captureActive {
+				ss.captureScan(data)
+			}
 			ss.enqueueOutput(string(data))
 		}
 	}
@@ -672,10 +834,52 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 	}
 
 	ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
+	ss.capCols.Store(uint32(cols))
 	return s.ptyBackend.Resize(ss.ptmx, cols, rows)
 }
 
-// Clear sends the ANSI clear sequence and emits a namespaced clear event.
+// clearKeyFor returns the bytes Clear should write to the shell's stdin to
+// make IT perform its own screen clear, dispatching on shellPath's basename
+// the same way integrationFor does.
+//
+// Ctrl+L (0x0C) is the portable choice: it's the default "clear screen,
+// redraw the current input line" key binding in PSReadLine (pwsh/powershell)
+// and in bash/zsh/fish's own readline/ZLE/line editor — sent as a single
+// control byte, exactly as if the user had pressed it, so it does not
+// disturb whatever the user has already typed on the current line the way
+// appending a literal "clear\r" command would (that would submit the
+// in-progress line with "clear" tacked onto the end). cmd.exe has no such
+// binding and no interactive line editor to speak of, so it gets "cls\r"
+// instead — the same as a user typing the command and pressing Enter.
+func clearKeyFor(shellPath string) []byte {
+	base := shellPath
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.TrimSuffix(strings.ToLower(base), ".exe")
+	if base == "cmd" {
+		return []byte("cls\r")
+	}
+	return []byte{0x0C}
+}
+
+// Clear makes the shell clear its own screen, the same way it would if the
+// user pressed Ctrl+L (or typed cls/clear and Enter) themselves — see
+// clearKeyFor. This is why letting the shell do it (rather than writing an
+// ANSI clear sequence straight into ss.ptmx, which a previous version did)
+// matters: PSReadLine (and bash/zsh's own line editor) track the real
+// console's cursor position via absolute Win32/terminfo addressing, which a
+// purely client-side xterm.js clear can never see. If only the frontend's
+// buffer is wiped, the shell's next prompt redraw still targets whatever
+// absolute row it last believed the cursor was at, and xterm.js — now
+// otherwise empty — pads up to that row with blank lines to honor the
+// positioning request, which is exactly the "empty line from before"
+// glitch this fixes. Driving the shell's own clear keeps its internal
+// cursor tracking and the frontend's rendered buffer in sync, since both
+// are driven by the same clear-and-redraw the shell performs. The
+// pty-cleared event still fires for an immediate, optimistic frontend wipe;
+// the shell's own (slightly delayed) redraw arriving over the normal
+// output stream is what keeps the two in sync afterward.
 func (s *TerminalService) Clear(sessionId string) error {
 	ss, err := s.resolveSession(sessionId)
 	if err != nil {
@@ -693,8 +897,7 @@ func (s *TerminalService) Clear(sessionId string) error {
 		return errors.New("terminal not started")
 	}
 
-	clearSeq := "\x1b[H\x1b[2J\x1b[3J"
-	b := []byte(clearSeq)
+	b := clearKeyFor(ss.shellPath)
 	for len(b) > 0 {
 		n, err := ss.ptmx.Write(b)
 		if err != nil {
@@ -702,6 +905,8 @@ func (s *TerminalService) Clear(sessionId string) error {
 		}
 		b = b[n:]
 	}
+
+	ss.resetCapture()
 
 	if wailsApp != nil {
 		wailsApp.Event.Emit("pty-cleared:"+ss.id, nil)
@@ -741,6 +946,8 @@ func (s *TerminalService) Stop(sessionId string) error {
 	}
 	ss.intentionalStop = true
 	ss.stopSessionLocked()
+	// See CloseSession's identical bump and the generation field's comment.
+	ss.generation++
 
 	oldPtmx := ss.ptmx
 	oldProc := ss.proc

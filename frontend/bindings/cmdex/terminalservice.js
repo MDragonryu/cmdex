@@ -16,7 +16,23 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * Clear sends the ANSI clear sequence and emits a namespaced clear event.
+ * Clear makes the shell clear its own screen, the same way it would if the
+ * user pressed Ctrl+L (or typed cls/clear and Enter) themselves — see
+ * clearKeyFor. This is why letting the shell do it (rather than writing an
+ * ANSI clear sequence straight into ss.ptmx, which a previous version did)
+ * matters: PSReadLine (and bash/zsh's own line editor) track the real
+ * console's cursor position via absolute Win32/terminfo addressing, which a
+ * purely client-side xterm.js clear can never see. If only the frontend's
+ * buffer is wiped, the shell's next prompt redraw still targets whatever
+ * absolute row it last believed the cursor was at, and xterm.js — now
+ * otherwise empty — pads up to that row with blank lines to honor the
+ * positioning request, which is exactly the "empty line from before"
+ * glitch this fixes. Driving the shell's own clear keeps its internal
+ * cursor tracking and the frontend's rendered buffer in sync, since both
+ * are driven by the same clear-and-redraw the shell performs. The
+ * pty-cleared event still fires for an immediate, optimistic frontend wipe;
+ * the shell's own (slightly delayed) redraw arriving over the normal
+ * output stream is what keeps the two in sync afterward.
  * @param {string} sessionId
  * @returns {$CancellablePromise<void>}
  */
@@ -56,12 +72,25 @@ export function GetActiveSession() {
 }
 
 /**
+ * GetLastOutput returns the captured output of the most recently completed
+ * command in the given session, as recorded via OSC 133 shell-integration
+ * markers.
+ * @param {string} sessionId
+ * @returns {$CancellablePromise<$models.TerminalLastOutput>}
+ */
+export function GetLastOutput(sessionId) {
+    return $Call.ByID(4011093730, sessionId).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType2($result);
+    }));
+}
+
+/**
  * ListSessions returns SessionInfo for all sessions in the manager.
  * @returns {$CancellablePromise<($models.SessionInfo | null)[]>}
  */
 export function ListSessions() {
     return $Call.ByID(1878753896).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType2($result);
+        return $$createType3($result);
     }));
 }
 
@@ -129,4 +158,5 @@ export function Write(sessionId, data) {
 // Private type creation functions
 const $$createType0 = $models.SessionInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($$createType1);
+const $$createType2 = $models.TerminalLastOutput.createFrom;
+const $$createType3 = $Create.Array($$createType1);

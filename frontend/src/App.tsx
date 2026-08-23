@@ -77,7 +77,7 @@ import {
     GetVariables,
     RunCommand,
 } from '../bindings/cmdex/executionservice';
-import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession } from '../bindings/cmdex/terminalservice';
+import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession, GetLastOutput } from '../bindings/cmdex/terminalservice';
 import i18n from './i18n';
 import {
     emptyDraft,
@@ -192,6 +192,24 @@ function App() {
         setTerminalCollapsed(false);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
     }, []);
+
+    // Prefer the backend's OSC 133 shell-integration capture — exact, and
+    // immune to terminal-width reflow — falling back to scraping the xterm
+    // buffer only when the session's shell has no integration (or the call
+    // itself fails).
+    const copyLastOutput = useCallback(async (sessionId: string) => {
+        const captured = await GetLastOutput(sessionId).catch(() => null);
+        const ref = terminalRefs.current[sessionId];
+        const output = captured?.available ? captured.text : (ref?.getLastOutput() || '');
+        if (!output) return;
+        try {
+            await copyText(output);
+            toast.success(captured?.truncated ? t('toast.outputCopiedTruncated') : t('toast.outputCopied'));
+        } catch (e) {
+            console.error('Failed to copy:', e);
+            toast.error(t('toast.outputCopyFailed'));
+        }
+    }, [t]);
 
     // -- Session CRUD callbacks (Task 1) --
 
@@ -338,7 +356,20 @@ function App() {
     // Tracks whether event names have been initialized from backend
     const [eventsInitialized, setEventsInitialized] = useState(false);
 
+    // Guards the mount effect below against React StrictMode's deliberate
+    // double-invocation of effects in development: without it, two
+    // concurrent ListSessions()/GetActiveSession() round-trips can each see
+    // "no sessions, no active session" before either one's CreateSession()
+    // call resolves, so both fall through to the "create a default session"
+    // branch — spawning two default terminal sessions (and starting two real
+    // shells) instead of one. Same class of bug, and same fix shape, as
+    // Terminal.tsx's startCalledRef guard on its own mount-time Start() call.
+    const sessionBootstrapRef = useRef(false);
+
     useEffect(() => {
+        if (sessionBootstrapRef.current) return;
+        sessionBootstrapRef.current = true;
+
         initEventNames().then(() => setEventsInitialized(true));
         // Load all sessions and active session on mount
         ListSessions().then((list) => {
@@ -1642,17 +1673,7 @@ function App() {
                                     <button
                                         className="terminal-copy-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => {
-                                            const ref = terminalRefs.current[activeSessionId];
-                                            const output = ref?.getLastOutput() || '';
-                                            if (!output) return;
-                                            copyText(output).then(() => {
-                                                toast.success('Output copied');
-                                            }).catch((e) => {
-                                                console.error('Failed to copy:', e);
-                                                toast.error('Failed to copy');
-                                            });
-                                        }}
+                                        onClick={() => copyLastOutput(activeSessionId)}
                                         aria-label="Copy terminal output"
                                         title="Copy last command output"
                                     >
@@ -1687,6 +1708,7 @@ function App() {
                                             isVisible={id === activeSessionId && !terminalCollapsed}
                                             theme={theme}
                                             sessionId={id}
+                                            initiallyRunning={session.running}
                                             onShellExit={() => {
                                                 // Mark session as stopped
                                                 setSessions(prev => prev.map(s =>
