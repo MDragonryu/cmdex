@@ -45,7 +45,7 @@ make clean                # removes bin/ and frontend/dist/, then restores the
 cd frontend && pnpm install
 ```
 
-**Tests:** Go tests run via `go test ./...` (see the file list under **Tests** below); frontend Playwright e2e tests via `cd frontend && pnpm test:e2e`. CI's `test` and `test-windows` jobs run `go test -race ./...` and gate the run on failure. `make check` and CI's `typecheck` job run `go build ./...` + `pnpm tsc --noEmit` + both linters as a separate, faster gate. CI never invokes the Makefile — `make check`/`fmt`/`lint` are local conveniences that mirror it.
+**Tests:** Go tests run via `go test ./...` (see the file list under **Tests** below); frontend Playwright e2e tests via `cd frontend && pnpm test:e2e`. CI's `test` and `test-windows` jobs run `go test -race ./...` and gate the run on failure. `make check` runs `go build ./...` + `pnpm tsc --noEmit`, while CI's `typecheck` job additionally runs both linters as a separate, faster gate. CI never invokes the Makefile — `make check`/`fmt`/`lint` are local conveniences that mirror its individual steps.
 
 ## Architecture
 

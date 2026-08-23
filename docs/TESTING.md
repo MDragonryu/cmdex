@@ -4,14 +4,13 @@ This document covers the current testing status, manual testing workflows, and a
 
 ## 1. Current Testing Status
 
-**Cmdex currently has no automated tests.**
+**Cmdex has automated tests, but coverage is uneven across the stack.**
 
-- **Go backend:** No `*_test.go` files exist in the repository.
-- **Frontend:** No `.test.ts`, `.spec.ts`, or `.test.tsx` files exist in `frontend/src/`.
-- **Scripts:** `frontend/package.json` does not define any test scripts (e.g., `test`, `test:unit`).
-- **CI:** The GitHub Actions workflows (`.github/workflows/ci.yml`) perform build checks and TypeScript type checking but do not run any test suites.
+- **Go backend:** `*_test.go` files exist across the root package (migrations, terminal sessions, PTY backends, execution, output capture/ANSI, shell integration — see [Section 7](#7-running-tests) for the full list).
+- **Frontend:** No `.test.ts`/`.test.tsx` unit tests exist yet in `frontend/src/`, but Playwright e2e specs exist under `frontend/e2e/tests/*.spec.ts`, run via the `test:e2e` script in `frontend/package.json`.
+- **CI:** `.github/workflows/ci.yml`'s `typecheck` job (build check, lint, type check) runs on every push/PR. The `test`, `test-windows`, and `build-check` jobs run the Go and Playwright suites but are gated to `workflow_dispatch` — they do **not** run automatically on push/PR.
 
-Verification is currently done entirely through manual QA and static analysis (`go build ./...` and `pnpm tsc --noEmit`).
+So automated push/PR verification is build + lint + type check only; the Go and Playwright suites must be triggered manually via `workflow_dispatch`, or run locally with `make test` / `go test ./...` / `cd frontend && pnpm test:e2e`.
 
 ## 2. Manual Testing Guide
 
@@ -394,14 +393,14 @@ test: {
 
 ### Current CI Pipeline
 
-Test execution **is part of the CI pipeline**. The CI configuration lives at `.github/workflows/ci.yml` and consists of four jobs:
+Test execution **is part of the CI configuration, but not of every automated run**. `.github/workflows/ci.yml` consists of four jobs; only `typecheck` runs automatically on push/PR — `test`, `test-windows`, and `build-check` are gated to `workflow_dispatch` (manual trigger) and must be run explicitly:
 
-| Job | Runner | What It Does |
-|-----|--------|--------------|
-| `typecheck` | ubuntu-24.04 | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
-| `test` | ubuntu-24.04 | `go test -race ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
-| `test-windows` | windows-latest | `go test -race ./...`, including the real ConPTY backend tests; blocks the run on failure |
-| `build-check` | matrix: ubuntu-24.04, macos-latest, windows-latest | Cross-platform build via `task build` |
+| Job | Runner | Trigger | What It Does |
+|-----|--------|---------|--------------|
+| `typecheck` | ubuntu-24.04 | push, PR, workflow_dispatch | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
+| `test` | ubuntu-24.04 | workflow_dispatch only | `go test -race ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
+| `test-windows` | windows-latest | workflow_dispatch only | `go test -race ./...`, including the real ConPTY backend tests; blocks the run on failure |
+| `build-check` | matrix: ubuntu-24.04, macos-latest, windows-latest | workflow_dispatch only | Cross-platform build via `task build` |
 
 > Note that CI runs `go test -race`, while `make test` runs plain `go test`. A data race in the terminal session code can therefore pass locally and fail in CI — run `go test -race ./...` yourself when touching `terminal_service.go` or `terminal_capture.go`.
 
@@ -417,4 +416,4 @@ Test execution **is part of the CI pipeline**. The CI configuration lives at `.g
 
 ### Adding Tests to CI
 
-Go tests and the Playwright e2e suite already run in the `test` job on every push/PR. What's still missing is frontend **unit** tests (Vitest is not yet configured — see [Section 5 — Updating CI to Run Tests](#5-how-to-add-tests)): once added, wire `cd frontend && pnpm test` into the `test` job alongside the existing steps.
+Go tests and the Playwright e2e suite already run in the `test` job, but only on manual `workflow_dispatch` — not on every push/PR. What's still missing is frontend **unit** tests (Vitest is not yet configured — see [Section 5 — Updating CI to Run Tests](#5-how-to-add-tests)): once added, wire `cd frontend && pnpm test` into the `test` job alongside the existing steps.
