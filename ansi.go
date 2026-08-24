@@ -134,11 +134,10 @@ const (
 //   - Other two-byte escapes: ESC followed by a single character (e.g. RIS,
 //     charset selection) that don't fit the CSI/OSC shape above.
 //
-// Carriage returns are handled per line: only the text after the last bare
-// '\r' on a line survives, which collapses in-place progress-bar/spinner
-// redraws down to their final state instead of keeping every intermediate
-// frame. '\r\n' is normalized to '\n' first so real line breaks aren't
-// treated as redraws.
+// Carriage returns are handled per line via collapseCarriageReturns, which
+// collapses in-place progress-bar/spinner redraws down to their final state
+// instead of keeping every intermediate frame. '\r\n' is normalized to '\n'
+// first so real line breaks aren't treated as redraws.
 //
 // cols is the session's actual terminal width, used to recognize and elide
 // ConPTY's own line-wrap injection artifacts before any of the above runs —
@@ -147,13 +146,16 @@ func stripANSI(s string, cols int) string {
 	s = removeWrapArtifacts(s, cols)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 
-	var b strings.Builder
-	b.Grow(len(s))
+	buf := make([]byte, 0, len(s))
+	lineStart := 0 // index into buf where the current physical line began
 
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c != escByte {
-			b.WriteByte(c)
+			buf = append(buf, c)
+			if c == '\n' {
+				lineStart = len(buf)
+			}
 			continue
 		}
 
@@ -168,8 +170,35 @@ func stripANSI(s string, cols int) string {
 			for j < len(s) && (s[j] >= csiParamLo && s[j] <= csiParamHi) {
 				j++
 			}
+			var param string
+			var final byte
 			if j < len(s) && s[j] >= csiFinalLo && s[j] <= csiFinalHi {
+				param = s[i+escSeqIntroLen : j]
+				final = s[j]
 				j++
+			}
+			// EL (Erase in Line) modes 0 (default/no param) and 2 both clear
+			// the WHOLE line here, even though in general EL0 only erases
+			// from the cursor to end of line: a bare '\r' immediately before
+			// puts the cursor at column 0, so "cursor to end" already covers
+			// the entire line, same as mode 2's unconditional whole-line
+			// erase. Mode 1 (erase start-of-line to cursor) is deliberately
+			// excluded — at column 0 it would erase nothing anyway, but more
+			// importantly a bare '\r' doesn't imply mode-1 semantics the way
+			// it does for 0/2. A progress bar or spinner erasing itself with
+			// "content\r\x1b[K" (the common default form) or
+			// "content\r\x1b[2K" must not leave "content" as the last visible
+			// line: once the CSI bytes are stripped, that pattern is
+			// byte-for-byte indistinguishable from a bare trailing '\r' with
+			// nothing typed after it — the ConPTY repaint case
+			// collapseCarriageReturns' doc comment deliberately preserves —
+			// so only a "\r" immediately followed by this exact erase
+			// (nothing typed in between) is treated as clearing the line; a
+			// K with no preceding '\r', or with real text after the '\r', is
+			// left to whatever was already written, unaffected.
+			if final == 'K' && (param == "" || param == "0" || param == "2") && len(buf) > 0 &&
+				buf[len(buf)-1] == '\r' {
+				buf = buf[:lineStart]
 			}
 			i = j - 1
 		case ']': // OSC
@@ -191,13 +220,43 @@ func stripANSI(s string, cols int) string {
 		}
 	}
 
-	stripped := b.String()
-
-	lines := strings.Split(stripped, "\n")
+	lines := strings.Split(string(buf), "\n")
 	for idx, line := range lines {
-		if last := strings.LastIndexByte(line, '\r'); last != -1 {
-			lines[idx] = line[last+1:]
-		}
+		lines[idx] = collapseCarriageReturns(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// collapseCarriageReturns collapses a single line's in-place '\r' redraws
+// down to their final state, the way a terminal overwrites a line from
+// column 0 every time it sees a bare CR: it returns the LAST NON-EMPTY
+// segment between carriage returns, not unconditionally "everything after
+// the final one".
+//
+// That distinction matters for a trailing CR with nothing written after it —
+// e.g. a ConPTY-repainted row, or how PowerShell renders an error record —
+// which means nothing actually overwrote the line. Naively keeping only the
+// text after the last '\r' would discard the whole line in that case (an
+// empty final segment), silently wiping real output; this previously made
+// "copy last output" return blank lines for a failed command on Windows
+// instead of the error text. Splitting on '\r' (a single ASCII byte, never a
+// UTF-8 continuation byte) is safe to do on the raw string without decoding
+// runes.
+func collapseCarriageReturns(line string) string {
+	if !strings.Contains(line, "\r") {
+		return line
+	}
+	// Scan backward from the end, one '\r'-delimited segment at a time,
+	// stopping at the first non-empty one — equivalent to strings.Split
+	// followed by a reverse walk, but without allocating a segment per '\r'
+	// in a line a spinner may have redrawn thousands of times.
+	end := len(line)
+	for end > 0 {
+		start := strings.LastIndexByte(line[:end], '\r') + 1
+		if start < end {
+			return line[start:end]
+		}
+		end = start - 1
+	}
+	return ""
 }

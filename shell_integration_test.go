@@ -977,3 +977,244 @@ func TestPwshIntegration_LongSingleLineOutputSurvivesTerminalWidthWrap(t *testin
 		)
 	}
 }
+
+// TestPwshIntegration_BuiltCommandLineActuallyExecutes is the direct
+// regression test for issue #63: a command dispatched from the app used to
+// appear at the Windows prompt fully typed and simply sit there. It asserts
+// on GetLastOutput rather than raw PTY bytes because the OSC 133 D marker
+// that makes GetLastOutput Available is emitted by cmdex.ps1 only after a
+// command has actually completed — echoed-but-unsubmitted input can never
+// produce one. The script concatenates two string literals so the assertion
+// is immune even if the echoed (unsubmitted) input line were ever mistaken
+// for output.
+func TestPwshIntegration_BuiltCommandLineActuallyExecutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	shellPath, _ := detectShell()
+	line := buildCommandLine(shellPath, "Write-Output ('cmdex' + '-exec-ok')", "")
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if strings.TrimSpace(out.Text) != "cmdex-exec-ok" {
+		t.Errorf("output = %q, want %q — command built by buildCommandLine did not execute", out.Text, "cmdex-exec-ok")
+	}
+	if out.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", out.ExitCode)
+	}
+}
+
+// TestPwshIntegration_LFAloneDoesNotSubmitCommandLine documents the
+// platform premise buildCommandLine's "\r" submit key rests on. Windows has
+// no tty line discipline: ConPTY delivers LF to PSReadLine as Ctrl+J, which
+// inserts a newline into the edit buffer instead of accepting the line, so
+// no command completes and no OSC 133 D marker is ever emitted. This writes
+// raw bytes rather than going through buildCommandLine, which would rewrite
+// the "\n" to "\r" and defeat the point. If this test ever fails,
+// PSReadLine's key bindings changed under us and shellDialect.submitKey
+// should be revisited — the assertion style mirrors
+// TestPwshIntegration_NoPhantomCompletionWhileIdle above, which likewise
+// proves a negative by waiting out a window many times the normal
+// round-trip.
+func TestPwshIntegration_LFAloneDoesNotSubmitCommandLine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "Write-Output ('cmdex' + '-lf-must-not-run')\n"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// This can only fail if the line WAS submitted, so the window only
+	// needs to comfortably exceed the round trip observed elsewhere in this
+	// file (waitForLastOutput's normal case resolves in well under a
+	// second); it never needs to wait out a deadline on the happy path.
+	time.Sleep(3 * time.Second)
+
+	out, err := s.GetLastOutput(id)
+	if err != nil {
+		t.Fatalf("GetLastOutput failed: %v", err)
+	}
+	if out.Available {
+		t.Errorf("GetLastOutput reported a completed command after a bare LF was written: %+v", out)
+	}
+}
+
+// TestPwshIntegration_WorkingDirPrefixChangesDirectory covers the second,
+// stacked bug behind issue #63: shellQuoteDir's POSIX single-quoting was
+// unconditionally applied to the cd prefix, which Windows PowerShell can't
+// parse as a path. It uses Test-Path on a relative file name rather than
+// comparing (Get-Location).Path against the temp dir string, because a
+// Windows runner's t.TempDir() can come back in a different (short-name or
+// differently-cased) form than what was requested — that would make a
+// string compare flaky for reasons unrelated to this fix.
+func TestPwshIntegration_WorkingDirPrefixChangesDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	dir := t.TempDir()
+	markerName := "cmdex-marker.txt"
+	if err := os.WriteFile(filepath.Join(dir, markerName), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write marker file: %v", err)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	shellPath, _ := detectShell()
+	line := buildCommandLine(shellPath, "Write-Output (Test-Path -LiteralPath '"+markerName+"')", dir)
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if strings.TrimSpace(out.Text) != "True" {
+		t.Errorf("output = %q, want %q — cd prefix did not change directory as expected", out.Text, "True")
+	}
+}
+
+// TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir validates the
+// premise cdPrefix's PowerShell branch relies on: -ErrorAction Stop
+// promotes Set-Location's normally non-terminating "path not found" into a
+// terminating error, which aborts the rest of the submitted line — the
+// same short-circuit && already gives the POSIX and cmd branches. If this
+// test ever fails, PowerShell's Set-Location error semantics changed and
+// cdPrefix's PowerShell branch needs to fall back to a separately submitted
+// cd line instead (accepting that a bad working directory would then run
+// the script in whatever directory the shell was already in).
+func TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	badDir := filepath.Join(t.TempDir(), "does-not-exist")
+	shellPath, _ := detectShell()
+	line := buildCommandLine(shellPath, "Write-Output ('SHOULD' + '-NOT-RUN')", badDir)
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// The failed Set-Location is itself a completed command under OSC 133
+	// capture, so a marker cycle does complete here — it just must not
+	// contain the script's output.
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if strings.Contains(out.Text, "SHOULD-NOT-RUN") {
+		t.Errorf(
+			"output = %q, want it NOT to contain %q — script ran despite a bad working directory",
+			out.Text,
+			"SHOULD-NOT-RUN",
+		)
+	}
+}
+
+// TestPwshIntegration_MultilineScriptShortCircuitsOnBadDir is the multi-line
+// counterpart to TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir:
+// a multi-line script's lines are each submitted separately (see
+// buildCommandLine's doc comment), so without grouping them into one unit,
+// -ErrorAction Stop would only gate the script's FIRST line — the second
+// line would run unconditionally as its own, independently-submitted
+// command even though the cd failed. groupDelims' dot-sourced "{ }" block
+// is what makes the whole script one thing that single terminating error
+// gates.
+func TestPwshIntegration_MultilineScriptShortCircuitsOnBadDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	badDir := filepath.Join(t.TempDir(), "does-not-exist")
+	shellPath, _ := detectShell()
+	line := buildCommandLine(
+		shellPath,
+		"Write-Output ('SHOULD' + '-NOT-RUN-1')\nWrite-Output ('SHOULD' + '-NOT-RUN-2')",
+		badDir,
+	)
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if strings.Contains(out.Text, "SHOULD-NOT-RUN") {
+		t.Errorf(
+			"output = %q, want it to contain neither SHOULD-NOT-RUN-1 nor -2 — "+
+				"script ran (at least partially) despite a bad working directory",
+			out.Text,
+		)
+	}
+}
+
+// TestPwshIntegration_CommandNotFoundOutputIsCaptured is the decisive test
+// for the "copy last output copies blank lines for a failed command" bug: a
+// command that doesn't exist prints its error through pwsh's error-record
+// rendering rather than Write-Output, which is the one code path that was
+// producing lines ending in a bare CR with nothing written after it —
+// collapseCarriageReturns (ansi.go) exists specifically to stop that from
+// wiping the line down to "".
+//
+// On failure this dumps the raw captured text with %q rather than a
+// trimmed/asserted-on comparison, on purpose: that is what distinguishes
+// "the text arrived but got mangled by stripANSI" (another CR/erase shape
+// this test's fix doesn't yet cover) from "the text never arrived at all"
+// (a marker-ordering problem — cmdex.ps1's "C" marker and PowerShell's own
+// error rendering write through two different console text writers, so an
+// unflushed "C" landing after the error text would reset capBuf over it,
+// per captureScan's 'C' case in terminal_capture.go). Either failure mode
+// needs a different fix, so the dump is what tells them apart.
+func TestPwshIntegration_CommandNotFoundOutputIsCaptured(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	shellPath, _ := detectShell()
+	line := buildCommandLine(shellPath, "cmdexNoSuchCommand12345", "")
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if !strings.Contains(out.Text, "not recognized") {
+		t.Errorf(
+			"captured output for a non-existent command = %q, want it to contain %q (raw dump for diagnosis: %q)",
+			out.Text, "not recognized", out.Text,
+		)
+	}
+	if out.ExitCode == 0 {
+		t.Errorf("ExitCode = 0 for a non-existent command, want non-zero")
+	}
+}

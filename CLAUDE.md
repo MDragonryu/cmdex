@@ -79,7 +79,7 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 | `models.go` | Data types: `Category`, `Command`, `VariableDefinition`, `VariablePreset`, `VariablePrompt`, `ExecutionRecord`, `AppSettings`, `OSPathMap` |
 | `db.go` | SQLite layer: connection (WAL + foreign keys), migration runner, FTS5 search, all SQL |
 | `script.go` | `GenerateScript`, `ParseScriptBody`, `ExtractTemplateVars`, `ReplaceTemplateVars`, `MergeDetectedVars` — pure functions, no I/O |
-| `executor.go` | Shell selection (`$SHELL -lc` on Unix, `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, and `EvalDefaults` (CEL) |
+| `executor.go` | Shell selection (`$SHELL -lc` on Unix, `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine` (per-shell cd prefix + line-submit key), and `EvalDefaults` (CEL) |
 | `migrations/` | Versioned migrations `0001`–`0010`; `migration.go` holds the ordered `Migrations` slice |
 
 **`executor.go` no longer executes anything.** It is a helper type: shell detection plus CEL default evaluation. Nothing writes temp scripts or spawns subprocesses any more.
@@ -89,8 +89,8 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 `ExecutionService.RunCommand(commandID, variables)`:
 
 1. Loads the command, applies `ReplaceTemplateVars`, then `stripShebang` and trims trailing newlines.
-2. If (and only if) the command or global settings define a working directory for the current OS, prefixes `cd '<dir>' && ` (`shellQuoteDir`, POSIX quoting).
-3. Appends `\n` and writes the whole line to the **active terminal session's PTY** via `terminalSvc.Write`.
+2. Determines the active session's shell (`SessionInfo.ShellPath`, falling back to `detectShell()` for a not-yet-started session) and passes it, the script, and the resolved working directory (`""` if none is configured) to `buildCommandLine` (`executor.go`).
+3. `buildCommandLine` composes the final line: a cd prefix syntactically correct for the shell's dialect — POSIX `cd '<dir>' && `, cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` (no `&&` operator on Windows PowerShell 5.1; `-ErrorAction Stop` keeps the short-circuit-on-failure behavior) — then the script, each line terminated by the shell's actual submit key: `\n` for POSIX shells (tty line discipline), `\r` for cmd.exe/PowerShell (ConPTY has no line discipline; it delivers LF as a literal Ctrl+J, not Enter). The finished line is written to the **active terminal session's PTY** via `terminalSvc.Write`.
 
 Output therefore streams back through that session's `pty-output:<id>` event and is rendered by xterm.js in `Terminal.tsx` — `RunCommand` does not capture output. The returned `ExecutionRecord` carries `FinalCmd` and errors only; `Output`/`ExitCode` are not populated on the success path, and nothing is persisted to history. Ctrl+C works because the PTY has a real foreground process group.
 
@@ -158,7 +158,8 @@ The editor is tab-based (it replaced a modal `CommandEditor`):
 - `TerminalService` owns up to `MaxSessions` (10) concurrent sessions. Each has its own PTY, read-loop goroutine, and event namespace; `sessionState` is guarded by a per-session mutex.
 - **Shell integration** (`shell_integration.go`) activates OSC 133 semantic-prompt markers by pointing the session shell at extra startup files embedded from `shell-integration/` (bash, zsh, fish, pwsh) and materialized under `~/.cmdex` — it never edits the user's own dotfiles. `//go:embed all:shell-integration` needs the `all:` prefix, or zsh's dot-prefixed files (`.zshenv`, `.zshrc`, …) are silently excluded and integration never activates.
 - Each session gets a fresh random **nonce** passed via a mode-0600 file (`oscNonceFileEnvVar`), not an env var value — the scripts read it and delete the file before sourcing any user profile, so spawned processes can't read it back out of `/proc/<pid>/environ` and forge markers.
-- `terminal_capture.go` scans the raw stream for `C`/`D` markers and records the bytes between them as the last command's output (bounded by `maxCaptureBytes`, 1 MiB, keeping the tail). `GetLastOutput` returns `TerminalLastOutput{Available, Text, ExitCode, Truncated}`; `Available: false` means the shell has no integration and the frontend should fall back to scraping the xterm buffer.
+- `terminal_capture.go` scans the raw stream for `C`/`D` markers and records the bytes between them as the last command's output (bounded by `maxCaptureBytes`, 1 MiB, keeping the tail). `GetLastOutput` returns `TerminalLastOutput{Available, Text, ExitCode, Truncated}`; `Available: false` means the shell has no integration and the frontend should fall back to scraping the xterm buffer. Exit code never gates `Available` — output is captured verbatim regardless of whether the command succeeded or failed. `Available: true` with blank `Text` is also possible (e.g. a stale "D" with no preceding "C"); the frontend's `copyLastOutput` (`App.tsx`) falls back to the xterm scrape in that case too, not only when `Available` is false.
+- `ansi.go`'s `stripANSI` collapses bare-`\r` redraws per line by keeping the **last non-empty** segment between carriage returns, not unconditionally the text after the final one — a trailing `\r` with nothing after it (a ConPTY repaint, or PowerShell's own error-record rendering) must not wipe the line. Getting this wrong previously made "copy last output" return blank lines instead of the real error text for a failed Windows command.
 - Toggled by `AppSettings.ShellIntegration` (nil = enabled). A change applies to **newly started sessions only**.
 - `captureScan` must be called only from the session's single read-loop goroutine, and it treats the byte slice it is handed as immutable — it may retain a trailing partial marker in `capCarry`.
 
@@ -260,7 +261,7 @@ Then append the new migration to the `Migrations` slice in `migrations/migration
 | Env | `pty_env_test.go` |
 | Frontend e2e | `frontend/e2e/tests/*.spec.ts` (Playwright) |
 
-`TestTerminalShutdown`/`TestTerminalExit` and `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped — they assume Unix shell syntax and POSIX quoting, not because the Windows backend is unsupported. See **Known Cross-Platform Gaps** in `AGENTS.md`.
+`TestTerminalShutdown`/`TestTerminalExit` are Windows-skipped — they call the raw `ptyStart` helper with Unix shell syntax, not because the Windows backend is unsupported. See **Known Cross-Platform Gaps** in `AGENTS.md`. `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` run on every platform; `TestBuildCommandLine` (`execution_service_test.go`) is the platform-independent table test covering POSIX/cmd.exe/PowerShell command-line construction, and `shell_integration_test.go`'s `TestPwshIntegration_*` suite includes Windows-only ConPTY execution tests gated on `pwshRealPTYSkipReason`.
 
 ## Conventions
 

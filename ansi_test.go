@@ -141,6 +141,92 @@ func TestStripANSI(t *testing.T) {
 			cols: 80,
 			want: "café \xc3\xa9clair",
 		},
+		{
+			// Regression: a trailing bare CR (nothing written after it) must
+			// not wipe the line it terminates. This is the exact shape
+			// PowerShell 7's error rendering produces under ConPTY, and was
+			// silently reducing "copy last output" for a failed command to
+			// blank lines.
+			name: "trailing bare CR keeps the line instead of wiping it",
+			in:   "The term 'x' is not recognized.\r",
+			cols: 80,
+			want: "The term 'x' is not recognized.",
+		},
+		{
+			// The real pwsh shape: two SGR-colored lines, each ending in a
+			// CRLF pair with an extra leading bare CR (ConPTY's own repaint,
+			// collapsed to one CR by the '\r\n' -> '\n' normalization run
+			// earlier in stripANSI). Both lines must survive intact.
+			name: "pwsh command-not-found error block survives across two lines",
+			in:   "\x1b[31;1mThe term 'x' is not recognized.\x1b[0m\r\r\n\x1b[31;1mCheck the spelling.\x1b[0m\r\r\n",
+			cols: 80,
+			want: "The term 'x' is not recognized.\nCheck the spelling.\n",
+		},
+		{
+			name: "multiple CRs on one line pick the last non-empty segment",
+			in:   "line1\r\rline2",
+			cols: 80,
+			want: "line2",
+		},
+		{
+			name: "a line made only of CRs collapses to empty",
+			in:   "\r\r\r",
+			cols: 80,
+			want: "",
+		},
+		{
+			// A spinner/progress bar erasing its own line before printing
+			// nothing further: "\r\x1b[2K" always means the line is now
+			// blank, not "content" — unlike the bare-trailing-CR case above,
+			// where nothing tells us the line was ever cleared.
+			name: "CR followed by full-line erase wipes the line",
+			in:   "content\r\x1b[2K",
+			cols: 80,
+			want: "",
+		},
+		{
+			// The erase is followed by real replacement text on the same
+			// line — the erased line must not resurrect the erased content.
+			name: "CR followed by full-line erase then new text keeps only the new text",
+			in:   "old status\r\x1b[2Knew status",
+			cols: 80,
+			want: "new status",
+		},
+		{
+			// \x1b[2K with no preceding CR is just another CSI code being
+			// stripped, same as any other cursor/erase command — it must
+			// not retroactively wipe text already written on the line.
+			name: "full-line erase without a preceding CR does not wipe prior text",
+			in:   "a\x1b[2K\x1b[1Gb",
+			cols: 80,
+			want: "ab",
+		},
+		{
+			// \x1b[K (no param, i.e. default mode 0: erase cursor-to-end)
+			// right after a bare CR has the same visible effect as \x1b[2K
+			// there, because the CR already put the cursor at column 0 — so
+			// this common spinner form ("content\r\x1b[K") must also wipe
+			// the line rather than leaving "content" behind.
+			name: "CR followed by default-mode erase wipes the line",
+			in:   "content\r\x1b[K",
+			cols: 80,
+			want: "",
+		},
+		{
+			name: "CR followed by explicit mode-0 erase wipes the line",
+			in:   "content\r\x1b[0K",
+			cols: 80,
+			want: "",
+		},
+		{
+			// Mode 1 (erase start-of-line to cursor) is NOT equivalent to
+			// mode 0/2 at column 0 in the general case and must not trigger
+			// the same whole-line clear.
+			name: "CR followed by mode-1 erase does not wipe the line",
+			in:   "content\r\x1b[1K",
+			cols: 80,
+			want: "content",
+		},
 	}
 
 	for _, tt := range tests {

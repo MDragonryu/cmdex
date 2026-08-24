@@ -195,16 +195,30 @@ function App() {
 
     // Prefer the backend's OSC 133 shell-integration capture — exact, and
     // immune to terminal-width reflow — falling back to scraping the xterm
-    // buffer only when the session's shell has no integration (or the call
-    // itself fails).
+    // buffer whenever the capture came back blank, not only when the
+    // session's shell has no integration at all: `available` can be true
+    // with empty/whitespace-only text (e.g. a stale capture from a "D" with
+    // no preceding "C"), and silently trusting that over a real fallback is
+    // what used to make this copy nothing — or, before the capture-side fix,
+    // copy blank lines — for a failed command.
     const copyLastOutput = useCallback(async (sessionId: string) => {
         const captured = await GetLastOutput(sessionId).catch(() => null);
         const ref = terminalRefs.current[sessionId];
-        const output = captured?.available ? captured.text : (ref?.getLastOutput() || '');
-        if (!output) return;
+        // available and text are set together (terminal_capture.go's 'D'
+        // handler) — a blank text alongside available:true means the command
+        // genuinely produced no output, not a bad capture, so it must not
+        // fall through to the xterm scrape (which would pick up the echoed
+        // input line instead and copy that with a misleading "copied" toast).
+        const usedCapture = captured?.available ?? false;
+        const capturedText = usedCapture ? captured.text : '';
+        const output = usedCapture ? capturedText : (ref?.getLastOutput() || '');
+        if (!output.trim()) {
+            toast.error(t('toast.outputEmpty'));
+            return;
+        }
         try {
             await copyText(output);
-            toast.success(captured?.truncated ? t('toast.outputCopiedTruncated') : t('toast.outputCopied'));
+            toast.success(usedCapture && captured?.truncated ? t('toast.outputCopiedTruncated') : t('toast.outputCopied'));
         } catch (e) {
             console.error('Failed to copy:', e);
             toast.error(t('toast.outputCopyFailed'));
