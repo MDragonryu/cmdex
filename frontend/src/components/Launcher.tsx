@@ -55,6 +55,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   const [variables, setVariables] = useState<VariablePromptType[]>([]);
   const [ranCommand, setRanCommand] = useState<Command | null>(null);
   const [eventsInitialized, setEventsInitialized] = useState(false);
+  const activationRef = useRef(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -130,11 +131,13 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   }, [focusSearch]);
 
   const close = useCallback(() => {
+    activationRef.current += 1;
     Hide().catch(() => {});
   }, []);
 
   /** Collapse back to the bare search field, discarding the run panel. */
   const resetToSearch = useCallback(() => {
+    activationRef.current += 1;
     setStage('search');
     setPendingCommand(null);
     setVariables([]);
@@ -143,14 +146,20 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     focusSearch();
   }, [focusSearch]);
 
-  const execute = useCallback(async (cmd: Command, values: Record<string, string>) => {
+  const execute = useCallback(async (
+    cmd: Command,
+    values: Record<string, string>,
+    activation = activationRef.current,
+  ) => {
     try {
       const id = sessionId || (await GetSessionID());
+      if (activation !== activationRef.current) return;
       if (!sessionId) setSessionId(id);
 
       setStage('running');
       setRanCommand(cmd);
       await Resize(true).catch(() => {});
+      if (activation !== activationRef.current) return;
 
       const record = await RunCommandInSession(cmd.id, values, id);
       if (record?.error) {
@@ -159,6 +168,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       // Focus the terminal so Ctrl+C and interactive prompts reach the PTY.
       requestAnimationFrame(() => terminalRef.current?.focus());
     } catch (err) {
+      if (activation !== activationRef.current) return;
       toast.error('Failed to run command: ' + String(err));
       console.error('launcher: execute failed', err);
     }
@@ -166,8 +176,11 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
 
   /** Activate the selected result: prompt for variables, or run straight away. */
   const activate = useCallback(async (cmd: Command) => {
+    const activation = activationRef.current + 1;
+    activationRef.current = activation;
     try {
       const prompts = await GetVariables(cmd.id);
+      if (activation !== activationRef.current) return;
       if (prompts && prompts.length > 0) {
         // Reuse the main window's variable entry UI rather than a second one.
         setPendingCommand(cmd);
@@ -176,8 +189,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
         Resize(true).catch(() => {});
         return;
       }
-      await execute(cmd, {});
+      if (activation !== activationRef.current) return;
+      await execute(cmd, {}, activation);
     } catch (err) {
+      if (activation !== activationRef.current) return;
       toast.error('Failed to prepare command: ' + String(err));
       console.error('launcher: activate failed', err);
     }

@@ -21,6 +21,35 @@ func autostartDesktopPath() (string, error) {
 	return filepath.Join(dir, "autostart", "cmdex.desktop"), nil
 }
 
+// quoteDesktopEntryArg quotes one argument using the escaping rules for the
+// freedesktop Exec key. Go's %q is not suitable here because it can emit Go
+// escapes such as \xNN that desktop-entry parsers do not understand.
+func quoteDesktopEntryArg(arg string) string {
+	var quoted strings.Builder
+	quoted.WriteByte('"')
+	for _, r := range arg {
+		switch r {
+		case '\\', '"', '`':
+			quoted.WriteByte('\\')
+			quoted.WriteRune(r)
+		case '%':
+			// A doubled percent is the literal-percent escape in Exec values;
+			// otherwise it starts a desktop-entry field code.
+			quoted.WriteString("%%")
+		case '\n':
+			quoted.WriteString(`\n`)
+		case '\r':
+			quoted.WriteString(`\r`)
+		case '\t':
+			quoted.WriteString(`\t`)
+		default:
+			quoted.WriteRune(r)
+		}
+	}
+	quoted.WriteByte('"')
+	return quoted.String()
+}
+
 // setAutostart writes or removes an XDG autostart .desktop entry, which is
 // honoured by GNOME, KDE, XFCE and other freedesktop-compliant environments.
 func setAutostart(enabled bool) error {
@@ -54,8 +83,9 @@ func setAutostart(enabled bool) error {
 		"Type=Application",
 		"Name=CmDex",
 		"Comment=CLI command manager with variable placeholders",
-		// Exec is split on spaces by the spec, so quote the binary path.
-		fmt.Sprintf("Exec=%q %s", exe, backgroundFlag),
+		// Exec is split on spaces by the spec, so quote the binary path using
+		// the desktop-entry grammar rather than Go string-literal escaping.
+		fmt.Sprintf("Exec=%s %s", quoteDesktopEntryArg(exe), backgroundFlag),
 		"Terminal=false",
 		"X-GNOME-Autostart-enabled=true",
 		"",

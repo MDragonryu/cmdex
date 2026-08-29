@@ -99,7 +99,10 @@ if (isLauncherWindow) {
                 if (s.windowWidth !== undefined) setWindowWidth(s.windowWidth)
                 if (s.windowHeight !== undefined) setWindowHeight(s.windowHeight)
                 const parsed = parseCustomThemes(s.customThemes)
-                if (parsed.length > 0) syncCustomThemes(parsed)
+                // Synchronize the empty list too: a settings refresh must not
+                // leave themes from an earlier state visible after they were
+                // removed or reset elsewhere.
+                syncCustomThemes(parsed)
                 const loadedCustom = parsed.find(c => c.id === t)
                 applyTheme(t, loadedCustom?.colors ?? null)
                 applyDensity(s.density || 'comfortable')
