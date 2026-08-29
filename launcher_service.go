@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -23,8 +24,14 @@ const (
 	launcherWindowName = "launcher"
 	launcherWindowURL  = "/?window=launcher"
 
-	launcherWidth  = 720
-	launcherHeight = 460
+	launcherWidth         = 720
+	launcherHeight        = 460
+	launcherCenterDivisor = 2
+
+	launcherBackgroundRed   = 15
+	launcherBackgroundGreen = 15
+	launcherBackgroundBlue  = 20
+	launcherBackgroundAlpha = 255
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
 
@@ -117,8 +124,13 @@ func (s *LauncherService) createWindowLocked() {
 		UseApplicationMenu: false,
 		// Escape is handled in the launcher UI so it can close the inline
 		// terminal first; letting the platform hide the window would skip that.
-		HideOnEscape:     false,
-		BackgroundColour: application.NewRGBA(15, 15, 20, 255),
+		HideOnEscape: false,
+		BackgroundColour: application.NewRGBA(
+			launcherBackgroundRed,
+			launcherBackgroundGreen,
+			launcherBackgroundBlue,
+			launcherBackgroundAlpha,
+		),
 		Mac: application.MacWindow{
 			// Float above ordinary windows and follow the user onto whichever
 			// Space or full-screen app is active, the way Spotlight does.
@@ -231,7 +243,7 @@ func (s *LauncherService) positionWindow(w *application.WebviewWindow, height in
 	}
 
 	area := screen.WorkArea
-	x := area.X + (area.Width-launcherWidth)/2
+	x := area.X + (area.Width-launcherWidth)/launcherCenterDivisor
 	y := area.Y + int(float64(area.Height)*launcherTopFraction)
 
 	if y+height > area.Y+area.Height {
@@ -268,7 +280,7 @@ func (s *LauncherService) GetSessionID() (string, error) {
 	}
 
 	if terminalSvc == nil {
-		return "", fmt.Errorf("terminal service not initialized")
+		return "", errors.New("terminal service not initialized")
 	}
 
 	info, err := terminalSvc.CreateInternalSession("Launcher")
@@ -281,7 +293,11 @@ func (s *LauncherService) GetSessionID() (string, error) {
 	// Another caller may have won the race; keep the first session and discard
 	// this one so only a single launcher session ever exists.
 	if s.sessionID != "" {
-		go terminalSvc.CloseSession(info.ID)
+		go func() {
+			if err := terminalSvc.CloseSession(info.ID); err != nil {
+				fmt.Printf("close duplicate launcher terminal session %s: %v\n", info.ID, err)
+			}
+		}()
 		return s.sessionID, nil
 	}
 	s.sessionID = info.ID
@@ -373,7 +389,7 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		// The login item is already installed or removed at this point. Undo it
 		// so the OS state cannot disagree with the persisted preference.
 		if rollbackErr := setAutostart(previous); rollbackErr != nil {
-			return fmt.Errorf("persist launch-at-login: %v; restore login item: %w", err, rollbackErr)
+			return fmt.Errorf("persist launch-at-login: %w; restore login item: %w", err, rollbackErr)
 		}
 		return fmt.Errorf("persist launch-at-login: %w", err)
 	}

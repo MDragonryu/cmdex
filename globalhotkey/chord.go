@@ -39,26 +39,28 @@ type Chord struct {
 // canonicalKeys maps accepted key spellings to the canonical name used by the
 // per-platform lookup tables. Only keys present on all three platforms are
 // accepted so a shortcut configured on one OS stays valid on the others.
-var canonicalKeys = map[string]string{
-	"SPACE": "SPACE",
-	"ENTER": "RETURN", "RETURN": "RETURN",
-	"TAB": "TAB",
-	"ESC": "ESCAPE", "ESCAPE": "ESCAPE",
-	"DEL": "DELETE", "DELETE": "DELETE",
-	"UP": "UP", "DOWN": "DOWN", "LEFT": "LEFT", "RIGHT": "RIGHT",
-}
+var canonicalKeys = buildCanonicalKeys()
 
-func init() {
+func buildCanonicalKeys() map[string]string {
+	keys := map[string]string{
+		"SPACE": "SPACE",
+		"ENTER": "RETURN", "RETURN": "RETURN",
+		"TAB": "TAB",
+		"ESC": "ESCAPE", "ESCAPE": "ESCAPE",
+		"DEL": "DELETE", "DELETE": "DELETE",
+		"UP": "UP", "DOWN": "DOWN", "LEFT": "LEFT", "RIGHT": "RIGHT",
+	}
 	for c := byte('A'); c <= 'Z'; c++ {
-		canonicalKeys[string(c)] = string(c)
+		keys[string(c)] = string(c)
 	}
 	for c := byte('0'); c <= '9'; c++ {
-		canonicalKeys[string(c)] = string(c)
+		keys[string(c)] = string(c)
 	}
 	for i := 1; i <= 20; i++ {
 		name := fmt.Sprintf("F%d", i)
-		canonicalKeys[name] = name
+		keys[name] = name
 	}
+	return keys
 }
 
 // ParseChord parses an accelerator string such as "CmdOrCtrl+Shift+K" into a
@@ -75,7 +77,7 @@ func ParseChord(accelerator string) (Chord, error) {
 		return c, errors.New("shortcut is empty")
 	}
 
-	for _, raw := range strings.Split(accelerator, "+") {
+	for raw := range strings.SplitSeq(accelerator, "+") {
 		token := strings.ToUpper(strings.TrimSpace(raw))
 		if token == "" {
 			return Chord{}, fmt.Errorf("shortcut %q has an empty component", accelerator)
@@ -119,7 +121,7 @@ func ParseChord(accelerator string) (Chord, error) {
 
 // String renders the chord back into a canonical accelerator string.
 func (c Chord) String() string {
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0)
 	if c.Ctrl {
 		parts = append(parts, "Ctrl")
 	}

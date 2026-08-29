@@ -45,7 +45,7 @@ func setAutostart(enabled bool) error {
 		return fmt.Errorf("resolve executable symlinks: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create autostart directory: %w", err)
 	}
 
@@ -61,7 +61,7 @@ func setAutostart(enabled bool) error {
 		"",
 	}, "\n")
 
-	if err := os.WriteFile(path, []byte(entry), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(entry), 0o600); err != nil {
 		return fmt.Errorf("write login item: %w", err)
 	}
 	return nil

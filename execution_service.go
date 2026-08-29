@@ -182,12 +182,26 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 // RunCommandInSession is RunCommand targeted at an explicit terminal session
 // rather than whichever session is active. The global quick launcher uses it
 // so its output stays self-contained in its dedicated internal session.
-func (s *ExecutionService) RunCommandInSession(commandID string, variables map[string]string, sessionID string) ExecutionRecord {
+func (s *ExecutionService) RunCommandInSession(
+	commandID string,
+	variables map[string]string,
+	sessionID string,
+) ExecutionRecord {
 	if terminalSvc == nil {
-		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: "terminal service not initialized", ExitCode: -1}
+		return ExecutionRecord{
+			ID:        uuid.New().String(),
+			CommandID: commandID,
+			Error:     "terminal service not initialized",
+			ExitCode:  -1,
+		}
 	}
 	if sessionID == "" {
-		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: "no terminal session specified", ExitCode: -1}
+		return ExecutionRecord{
+			ID:        uuid.New().String(),
+			CommandID: commandID,
+			Error:     "no terminal session specified",
+			ExitCode:  -1,
+		}
 	}
 
 	cmd, err := db.GetCommand(commandID)
