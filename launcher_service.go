@@ -68,7 +68,12 @@ type LauncherStatus struct {
 // hidden, so opening the launcher never rebuilds React state or respawns a
 // shell.
 type LauncherService struct {
-	mu        sync.Mutex
+	mu sync.Mutex
+	// applyMu serializes the complete settings application transaction. In
+	// particular, the settings read must stay ordered with unregister,
+	// register, and the final status publication when startup and frontend
+	// settings changes overlap.
+	applyMu   sync.Mutex
 	window    *application.WebviewWindow
 	hotkeys   *globalhotkey.Manager
 	sessionID string
@@ -326,6 +331,9 @@ func (s *LauncherService) GetStatus() LauncherStatus {
 // UI can show partial success (for example: enabled, but the combination is
 // already taken).
 func (s *LauncherService) ApplySettings() LauncherStatus {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
 	status := LauncherStatus{
 		Supported: s.hotkeys != nil && s.hotkeys.Supported(),
 		Platform:  runtime.GOOS,

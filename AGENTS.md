@@ -58,7 +58,6 @@ In `main.go`, eight services are registered as `application.Service`:
 | `SettingsService` | `settings_service.go` | `../bindings/cmdex/settingsservice` |
 | `ImportExportService` | `importexport_service.go` | `../bindings/cmdex/importexportservice` |
 | `EventService` | `event_service.go` | `../bindings/cmdex/eventservice` |
-| `TerminalService` | `terminal_service.go` (+ `pty_backend*.go`) | `../bindings/cmdex/terminalservice` |
 | `LauncherService` | `launcher_service.go` | `../bindings/cmdex/launcherservice` |
 
 Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates bindings from exported methods into `frontend/bindings/cmdex/<servicename>.js` (JS with JSDoc types, plus `models.js` and a barrel `index.js`). **Never hand-edit `frontend/bindings/`** — it's generated output, but it **is** committed (so a fresh clone type-checks without the Wails CLI installed); regenerate with `wails3 generate bindings` and commit the result alongside the Go change that caused it.
@@ -125,7 +124,7 @@ Events.On(`pty-cleared:${sessionId}`, handler);  // no payload
 | `models.go` | Go domain types for Wails/JSON and SQL scanning |
 | `script.go` | `{{var}}` parsing and substitution, shebang *stripping* (pure functions, no I/O) |
 | `executor.go` | Shell selection, `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine` (per-shell cd prefix + line-submit key), CEL default evaluation. **Executes nothing** |
-| `terminal_service.go` | `TerminalService`: multi-session PTY terminals, `MaxSessions = 10` |
+| `terminal_service.go` | `TerminalService`: multi-session PTY terminals, up to 10 user-visible sessions (`MaxSessions`; internal launcher sessions excluded) |
 | `pty_backend*.go` | PTY abstraction per platform: `creack/pty` (Unix), `charmbracelet/x/conpty` (Windows), plus a mock for tests |
 | `pty_env.go` | `buildPtyEnv` — supplies `TERM`/`COLORTERM`/`LANG` that launchd-started GUI apps don't inherit |
 | `shell_integration.go` | Materializes embedded `shell-integration/` scripts to `~/.cmdex`; activates OSC 133 markers via a per-session nonce |

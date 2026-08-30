@@ -29,9 +29,18 @@ func quoteDesktopEntryArg(arg string) string {
 	quoted.WriteByte('"')
 	for _, r := range arg {
 		switch r {
-		case '\\', '"', '`':
+		case '\\':
+			// Exec values pass through the desktop-entry unquoting rules before
+			// field-code expansion. Four backslashes preserve one literal
+			// backslash through both parsing stages.
+			quoted.WriteString(`\\\\`)
+		case '"', '`':
 			quoted.WriteByte('\\')
 			quoted.WriteRune(r)
+		case '$':
+			// A dollar sign is reserved in a quoted Exec argument. Two
+			// backslashes preserve it through both parsing stages.
+			quoted.WriteString(`\\$`)
 		case '%':
 			// A doubled percent is the literal-percent escape in Exec values;
 			// otherwise it starts a desktop-entry field code.

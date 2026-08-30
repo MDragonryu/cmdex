@@ -21,11 +21,12 @@ type ptyWinsize struct {
 	Cols uint16
 }
 
-// MaxSessions is the maximum number of concurrent terminal sessions. Beyond
-// this limit, CreateSession returns an error to protect against unbounded
-// resource use. The number 10 is chosen as a reasonable cap that exceeds
-// normal user workflows (typical use is 1-3 sessions) while preventing
-// accidental resource exhaustion.
+// MaxSessions is the maximum number of concurrent user-visible terminal
+// sessions. Internal sessions, such as the launcher's hidden terminal, are
+// excluded from this limit. Beyond it, CreateSession returns an error to
+// protect against unbounded resource use. The number 10 is chosen as a
+// reasonable cap that exceeds normal user workflows (typical use is 1-3
+// sessions) while preventing accidental resource exhaustion.
 const MaxSessions = 10
 
 const (
@@ -808,10 +809,40 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 		return
 	}
 
-	// Unintentional exit (crash) — auto-restart after brief delay.
-	time.Sleep(autoRestartDelay)
-	if err := s.Start(ss.id, cols, rows); err != nil {
+	// Unintentional exit (crash) — auto-restart after a brief, cancellable
+	// delay. Stop/CloseSession may happen while the delay is pending.
+	if !waitForAutoRestart(stopCh) {
+		return
+	}
+
+	// Re-check ownership after the timer fires. Stop/CloseSession can race the
+	// timer wake-up, and startSessionLocked must not resurrect that lifecycle.
+	ss.mu.Lock()
+	if ss.closed || ss.intentionalStop || ss.stopCh != stopCh {
+		ss.mu.Unlock()
+		return
+	}
+	err := s.startSessionLocked(ss, cols, rows)
+	ss.mu.Unlock()
+	if err != nil {
 		fmt.Printf("monitorExit: auto-restart failed for session %s: %v\n", ss.id, err)
+	}
+}
+
+// waitForAutoRestart waits for the crash-restart delay unless the owning
+// session is stopped first. Keeping the timer selection separate makes the
+// cancellation behavior deterministic to test without sleeping in a test.
+func waitForAutoRestart(stopCh <-chan struct{}) bool {
+	return waitForAutoRestartTimer(stopCh, time.NewTimer(autoRestartDelay))
+}
+
+func waitForAutoRestartTimer(stopCh <-chan struct{}, timer *time.Timer) bool {
+	defer timer.Stop()
+	select {
+	case <-stopCh:
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

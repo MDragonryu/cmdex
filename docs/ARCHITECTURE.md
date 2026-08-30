@@ -4,7 +4,7 @@
 
 CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 19 + TypeScript** frontend. All data is stored locally in a **SQLite** database with no external services or cloud dependencies.
 
-The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and a separate settings window.
+The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals, and the launcher) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and two auxiliary UIs: the settings window and the global launcher window.
 
 The defining architectural fact: **commands are not run by a Go subprocess helper.** They are typed into a live pseudo-terminal, exactly as if the user had typed them. Everything about output handling, interactivity, and signal delivery follows from that.
 
@@ -98,7 +98,7 @@ This is the largest and most subtle part of the backend.
 
 | File | Role |
 |---|---|
-| `terminal_service.go` | Session registry (up to `MaxSessions` = 10), per-session PTY + read-loop goroutine, `Write`/`Resize`/`Clear`/`Start`/`Stop` |
+| `terminal_service.go` | Session registry (up to `MaxSessions` = 10 user-visible sessions; internal launcher sessions excluded), per-session PTY + read-loop goroutine, `Write`/`Resize`/`Clear`/`Start`/`Stop` |
 | `pty_backend.go` | The `ptyHandle` / `ptyProcess` interfaces the service is written against |
 | `pty_backend_unix.go` | `creack/pty` implementation |
 | `pty_backend_windows.go` | Real ConPTY implementation via `charmbracelet/x/conpty` |
@@ -192,7 +192,7 @@ Note the deliberate asymmetry: `hasExplicitWorkingDir` decides whether to emit a
 
 ### Application Entry (`main.tsx`)
 
-The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a simple bundle (no vendor code-splitting) and only lazy-loads heavy entry points — `App` vs `SettingsPage`, and the xterm `Terminal`. It renders one of two UIs based on the URL:
+The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a simple bundle (no vendor code-splitting) and only lazy-loads heavy entry points — `App` vs `SettingsPage`, and the xterm `Terminal`. Wails creates three native windows, all served by this same bundle, and the frontend renders one of three UIs based on the URL:
 
 - **Main Window** (`/`, no query param) — lazily loads `<App />`
 - **Settings Window** (`/?window=settings`) — lazily loads `<SettingsPage />`, which persists preferences independently and emits `settings-changed` back to the main window
@@ -464,7 +464,7 @@ cmdex/
 | Abstraction | File | Description |
 |---|---|---|
 | `DB` struct | `db.go` | Wrapper over `database/sql` with the `modernc.org/sqlite` driver. Owns migrations (version 10), FTS5 triggers, WAL mode, and every CRUD query the services use. |
-| `TerminalService` + `sessionState` | `terminal_service.go` | Session registry keyed by ID, capped at `MaxSessions`. Each `sessionState` holds its PTY handle, process, shell path, last size, capture buffers, and nonce, guarded by a per-session mutex. |
+| `TerminalService` + `sessionState` | `terminal_service.go` | Session registry keyed by ID, capped at `MaxSessions` user-visible sessions (internal launcher sessions excluded). Each `sessionState` holds its PTY handle, process, shell path, last size, capture buffers, and nonce, guarded by a per-session mutex. |
 | `LauncherService` | `launcher_service.go` | Persistent always-on-top launcher window, global shortcut, launch-at-login, and dedicated internal terminal session. |
 | `ptyHandle` / `ptyProcess` | `pty_backend.go` | The only interfaces the terminal service is written against, so Unix, Windows, and mock backends are interchangeable. |
 | `Executor` struct | `executor.go` | Shell selection (`$SHELL -lc` / `cmd /C`) plus CEL default evaluation. Constructed once at startup; executes nothing. |

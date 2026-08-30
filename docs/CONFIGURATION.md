@@ -52,13 +52,13 @@ Controls the spacing and compactness of the UI.
 
 ---
 
-## 3. Terminal Settings
+## 3. Terminal Behaviour
 
 Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal.
 
 The shell used for each session is chosen by the backend — `$SHELL` on macOS/Linux (falling back to `/bin/sh`), `cmd` on Windows.
 
-Up to **10** terminal sessions (`MaxSessions` in `terminal_service.go`) may be open at once. Panel height and collapsed state are stored in `localStorage`, not the database, since they are per-machine UI state.
+Up to **10 user-visible** terminal sessions (`MaxSessions` in `terminal_service.go`) may be open at once. The launcher's hidden internal session is excluded from this limit. Panel height and collapsed state are stored in `localStorage`, not the database, since they are per-machine UI state.
 
 ### Shell Integration
 
@@ -124,10 +124,10 @@ Additional known limitations:
 - **Multi-monitor:** the launcher always opens on the **primary** display. Wails
   alpha.74 exposes no public cursor-position API, so the display the user is
   actually looking at cannot be determined portably.
-- **Shortcut conflicts on macOS:** because the shortcut is delivered through a
-  CGEventTap, a combination already claimed by another application does not
-  produce a registration error — the most recently installed tap receives the
-  keystroke and consumes it.
+- **Shortcut conflicts on macOS:** hotkey registration may fail when another
+  application already uses the combination. `LauncherService.ApplySettings`
+  exposes that registration error in the launcher status so Settings can show
+  the user why the shortcut is unavailable.
 
 ---
 
@@ -172,7 +172,6 @@ The `data` column contains a JSON object with the following fields:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `locale` | string | `"en"` | UI language code |
-| `terminal` | string | `""` | Preferred terminal ID; empty = auto-detect |
 | `theme` | string | `"vscode-dark"` | Active theme ID |
 | `lastDarkTheme` | string | `"vscode-dark"` | Last selected dark theme |
 | `lastLightTheme` | string | `"vscode-light"` | Last selected light theme |
@@ -423,4 +422,3 @@ The `Taskfile.yml` supports the following task-level variable overrides for buil
 | `TAG` | `cmdex:latest` | Docker image tag for `build:docker` and `run:docker` tasks. |
 | `PORT` | `8080` | Host port mapping for `run:docker` task. |
 | `DEV` | `""` | When set to `"true"`, activates development-optimized frontend builds with HMR support. |
-
