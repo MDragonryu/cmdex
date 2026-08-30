@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { getCommandDisplayTitle } from '../utils/tab';
 import { filterCommands, scriptSnippet } from '../utils/commandSearch';
+import { transitionLauncherQuery, type LauncherStage } from '../utils/launcher';
 import { eventNames, initEventNames } from '../wails/events';
 import { Kbd } from './ui/kbd';
 import TerminalComponent, { type TerminalHandle } from './Terminal';
@@ -38,7 +39,7 @@ import { Hide, Resize, GetSessionID, ShowMainWindow } from '../../bindings/cmdex
  * read the output, press Escape, move on.
  */
 
-type Stage = 'search' | 'variables' | 'running';
+type Stage = LauncherStage;
 
 interface LauncherProps {
   theme: string;
@@ -191,8 +192,11 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
         }
         return;
       }
+      if (activation !== activationRef.current) return;
       // Focus the terminal so Ctrl+C and interactive prompts reach the PTY.
-      requestAnimationFrame(() => terminalRef.current?.focus());
+      requestAnimationFrame(() => {
+        if (activation === activationRef.current) terminalRef.current?.focus();
+      });
     } catch (err) {
       if (activation !== activationRef.current) return;
       toast.error('Failed to run command: ' + String(err));
@@ -247,6 +251,23 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     [filtered, activeIndex, activate],
   );
 
+  const handleQueryChange = useCallback((nextQuery: string) => {
+    const transition = transitionLauncherQuery(stage, nextQuery);
+    if (transition.clearRunState) {
+      // Invalidate the command's pending async work before collapsing the
+      // output panel. A late execution result or focus callback must not put
+      // the launcher back into the stale running state after the user starts
+      // a new search.
+      activationRef.current += 1;
+      setStage('search');
+      setPendingCommand(null);
+      setVariables([]);
+      setRanCommand(null);
+      Resize(false).catch(() => {});
+    }
+    setQuery(transition.query);
+  }, [stage]);
+
   // Escape anywhere in the window, including while the terminal has focus.
   //
   // This must run in the capture phase: xterm installs its own keydown handler
@@ -292,7 +313,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
           className="launcher-input"
           placeholder="Search CmDex commands…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => handleQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}
           autoComplete="off"
           spellCheck={false}

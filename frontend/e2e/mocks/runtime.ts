@@ -138,6 +138,7 @@ let launcherSession: {
   shellPath: string;
   workingDir: string;
 } | null = null;
+let launcherRunResult: any | null = null;
 
 function getLauncherStatus() {
   const enabled = settings.launcherEnabled === true;
@@ -563,7 +564,7 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
 
   RunCommandInSession: (commandID: string, variables: Record<string, string>, _sessionID: string) => {
     const cmd = findCommand(commandID);
-    return {
+    const defaultResult = {
       id: uid(),
       commandId: commandID,
       scriptContent: cmd?.scriptContent || '',
@@ -574,6 +575,7 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
       workingDir: '',
       executedAt: now(),
     };
+    return launcherRunResult ? { ...launcherRunResult, commandId: commandID } : defaultResult;
   },
 
   // ── Import / Export ──────────────────────────────────────
@@ -776,6 +778,7 @@ export class CancellablePromise<T> extends Promise<T> {
     nextId = 0;
     terminalSessions = [];
     launcherSession = null;
+    launcherRunResult = null;
     launcherVisible = false;
     launcherEventLog.length = 0;
     activeTerminalSessionId = null;
@@ -876,6 +879,9 @@ export class CancellablePromise<T> extends Promise<T> {
   setLastOutput(data: { available: boolean; text: string; exitCode: number; truncated: boolean }) {
     lastOutputResult = { ...data };
   },
+  setLauncherRunResult(result: any | null) {
+    launcherRunResult = result;
+  },
   // Exercise LauncherService.Show/Hide/Toggle through the same name-based
   // dispatcher used by generated bindings, while exposing enough state to
   // assert the native-window event contract.
@@ -884,6 +890,9 @@ export class CancellablePromise<T> extends Promise<T> {
   },
   get launcherVisible() {
     return launcherVisible;
+  },
+  get launcherSessionId() {
+    return launcherSession?.id || '';
   },
   launcherEventLog,
 };

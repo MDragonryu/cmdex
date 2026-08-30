@@ -78,4 +78,41 @@ test.describe('Launcher', () => {
     await expect(page.locator('.launcher-results')).toBeVisible();
     await expect(page.getByRole('option', { name: /Run me/ })).toBeVisible();
   });
+
+  test('typing after command output immediately returns to search and ignores stale PTY output', async ({ page, seed }) => {
+    await seed({
+      commands: [command('launcher-run', 'Run me'), command('launcher-search', 'Search me')],
+    });
+    await openLauncher(page);
+
+    await page.getByRole('option', { name: /Run me/ }).click();
+    await expect(page.locator('.launcher-run-panel')).toBeVisible();
+    const sessionId = await page.evaluate(() => window.__cmdexE2E!.launcherSessionId);
+
+    await page.getByRole('combobox', { name: /Search CmDex commands/ }).fill('Search me');
+    await expect(page.locator('.launcher-run-panel')).toHaveCount(0);
+    await expect(page.getByRole('option', { name: /Search me/ })).toBeVisible();
+
+    await page.evaluate((id) => window.__cmdexE2E!.emitPtyOutput(id, 'stale output after search'), sessionId);
+    await expect(page.locator('.launcher-results')).toBeVisible();
+    await expect(page.getByRole('option', { name: /Search me/ })).toBeVisible();
+  });
+
+  test('typing after an in-band execution failure remains a normal search', async ({ page, seed }) => {
+    await seed({
+      commands: [command('launcher-fail', 'Fail me'), command('launcher-search', 'Search me')],
+    });
+    await openLauncher(page);
+    await page.evaluate(() => window.__cmdexE2E!.setLauncherRunResult({ error: 'mock execution failed', exitCode: -1 }));
+
+    await page.getByRole('option', { name: /Fail me/ }).click();
+    await expect(page.locator('.launcher-run-panel')).toHaveCount(0);
+    await page.getByRole('combobox', { name: /Search CmDex commands/ }).fill('Search me');
+    await expect(page.getByRole('option', { name: /Search me/ })).toBeVisible();
+
+    const sessionId = await page.evaluate(() => window.__cmdexE2E!.launcherSessionId);
+    await page.evaluate((id) => window.__cmdexE2E!.emitPtyOutput(id, 'stale failed output'), sessionId);
+    await expect(page.locator('.launcher-results')).toBeVisible();
+    await expect(page.getByRole('option', { name: /Search me/ })).toBeVisible();
+  });
 });

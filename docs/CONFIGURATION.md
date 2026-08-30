@@ -113,7 +113,7 @@ would be unusable in every other application.
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| macOS | Supported | Uses Wails' native global shortcut manager, which does not require Accessibility permission. The launcher floats above full-screen apps, moves into the active Space, and opens on the display containing the pointer. |
+| macOS | Supported | Uses Wails' native global shortcut manager, which does not require Accessibility permission. The launcher floats above full-screen apps, is available on every Space, and opens on the display containing the pointer. |
 | Windows | Supported | Uses Win32 `RegisterHotKey` and does not require CGO. Appears above normal windows on the active virtual desktop. |
 | Linux (X11) | Supported | Uses `XGrabKey`. Some keys map to multiple modifier bits, so an exotic combination may not register. |
 | Linux (Wayland) | Supported | Uses the desktop portal's `org.freedesktop.portal.GlobalShortcuts` interface. The compositor may assign or adjust the final binding; `LauncherStatus.registered` reflects the requested registration, not the compositor's final choice. |

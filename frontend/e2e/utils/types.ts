@@ -117,8 +117,12 @@ declare global {
             setPickDirectoryResult(path: string): void;
             // Configure GetLastOutput's next return value.
             setLastOutput(data: { available: boolean; text: string; exitCode: number; truncated: boolean }): void;
+            // Configure the in-band launcher execution result used by launcher
+            // search/output regression tests.
+            setLauncherRunResult(result: Record<string, unknown> | null): void;
             invokeLauncher(method: 'Show' | 'Hide' | 'Toggle'): void;
             launcherVisible: boolean;
+            launcherSessionId: string;
             launcherEventLog: Array<{ name: string; data: unknown }>;
         };
     }

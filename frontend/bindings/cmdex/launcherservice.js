@@ -82,10 +82,10 @@ export function SetLaunchAtLogin(enabled) {
 }
 
 /**
- * Show reveals the launcher, moves it to the active Space/display and focuses
- * it. The native macOS presenter is called after Wails shows the window so it
- * can re-order the native window after a global shortcut invocation; other
- * platforms use the Wails screen API fallback.
+ * Show reveals and focuses the launcher. On macOS the native presenter selects
+ * the pointer's display before activation and presents the window on all Spaces
+ * (including an unrelated fullscreen app); other platforms use the Wails screen
+ * API fallback.
  * @returns {$CancellablePromise<void>}
  */
 export function Show() {

@@ -21,8 +21,9 @@ import (
 const DefaultLauncherShortcut = "CmdOrCtrl+Shift+K"
 
 const (
-	launcherWindowName = "launcher"
-	launcherWindowURL  = "/?window=launcher"
+	launcherWindowName  = "launcher"
+	launcherWindowTitle = "CmDex Launcher"
+	launcherWindowURL   = "/?window=launcher"
 
 	launcherWidth         = 720
 	launcherHeight        = 460
@@ -36,11 +37,11 @@ const (
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
 
-	// launcherMacCollectionBehavior keeps the launcher in the Space where the
-	// shortcut was invoked while allowing it to overlay fullscreen apps. It
-	// deliberately does not use CanJoinAllSpaces: that would leave the window
-	// attached to the Cmdex Space instead of following the active Space.
-	launcherMacCollectionBehavior = application.MacWindowCollectionBehaviorMoveToActiveSpace |
+	// launcherMacCollectionBehavior lets the launcher overlay an unrelated
+	// fullscreen app while remaining available on every Space. MoveToActiveSpace
+	// is intentionally omitted: Wails can otherwise move the launcher into
+	// Cmdex's old Space while making it key.
+	launcherMacCollectionBehavior = application.MacWindowCollectionBehaviorCanJoinAllSpaces |
 		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
 		application.MacWindowCollectionBehaviorIgnoresCycle |
 		application.MacWindowCollectionBehaviorTransient
@@ -206,7 +207,7 @@ func (s *LauncherService) createWindowLocked() {
 	}
 
 	options := application.WebviewWindowOptions{
-		Title:              "CmDex Launcher",
+		Title:              launcherWindowTitle,
 		Name:               launcherWindowName,
 		URL:                launcherWindowURL,
 		Width:              launcherWidth,
@@ -251,10 +252,10 @@ func (s *LauncherService) createWindowLocked() {
 
 // ========== Window control ==========
 
-// Show reveals the launcher, moves it to the active Space/display and focuses
-// it. The native macOS presenter is called after Wails shows the window so it
-// can re-order the native window after a global shortcut invocation; other
-// platforms use the Wails screen API fallback.
+// Show reveals and focuses the launcher. On macOS the native presenter selects
+// the pointer's display before activation and presents the window on all Spaces
+// (including an unrelated fullscreen app); other platforms use the Wails screen
+// API fallback.
 func (s *LauncherService) Show() {
 	s.mu.Lock()
 	s.createWindowLocked()
@@ -267,10 +268,15 @@ func (s *LauncherService) Show() {
 	}
 
 	application.InvokeAsync(func() {
+		prepared := false
 		presentLauncherWindow(
+			func() { prepared = prepareLauncherWindowNative(launcherWindowTitle) },
 			func() { w.Show() },
 			func() bool {
-				return presentLauncherWindowNative(launcherWindowName, launcherHeight, launcherTopFraction)
+				if !prepared {
+					return false
+				}
+				return presentLauncherWindowNative(launcherWindowTitle, launcherWidth, launcherHeight, launcherTopFraction, true)
 			},
 			func() { s.positionWindow(w, launcherHeight) },
 			func() { w.Focus() },
@@ -289,9 +295,22 @@ func (s *LauncherService) Hide() {
 		return
 	}
 	application.InvokeAsync(func() {
-		w.Hide()
+		hideLauncherWindow(w)
 		wailsApp.Event.Emit(eventNames.LauncherHidden)
 	})
+}
+
+func hideLauncherWindow(w *application.WebviewWindow) {
+	hideLauncherWindowWith(
+		func() bool { return hideLauncherWindowNative(launcherWindowTitle) },
+		func() { w.Hide() },
+	)
+}
+
+func hideLauncherWindowWith(nativeHide func() bool, fallbackHide func()) {
+	if !nativeHide() {
+		fallbackHide()
+	}
 }
 
 // Toggle shows the launcher when hidden and hides it when visible. This is what
@@ -325,7 +344,7 @@ func (s *LauncherService) Resize(expanded bool) {
 
 	application.InvokeAsync(func() {
 		w.SetSize(launcherWidth, height)
-		if !presentLauncherWindowNative(launcherWindowName, height, launcherTopFraction) {
+		if !presentLauncherWindowNative(launcherWindowTitle, launcherWidth, height, launcherTopFraction, false) {
 			s.positionWindow(w, height)
 		}
 	})

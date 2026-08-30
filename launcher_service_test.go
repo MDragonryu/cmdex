@@ -114,12 +114,12 @@ func TestFreshSettingsDisableLauncher(t *testing.T) {
 	}
 }
 
-func TestLauncherMacCollectionBehaviorFollowsActiveSpace(t *testing.T) {
-	if launcherMacCollectionBehavior&application.MacWindowCollectionBehaviorCanJoinAllSpaces != 0 {
-		t.Fatal("launcher collection behavior must not join every Space")
+func TestLauncherMacCollectionBehaviorSupportsFullscreenAcrossSpaces(t *testing.T) {
+	if launcherMacCollectionBehavior&application.MacWindowCollectionBehaviorCanJoinAllSpaces == 0 {
+		t.Fatal("launcher collection behavior must join all Spaces")
 	}
 
-	want := application.MacWindowCollectionBehaviorMoveToActiveSpace |
+	want := application.MacWindowCollectionBehaviorCanJoinAllSpaces |
 		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
 		application.MacWindowCollectionBehaviorIgnoresCycle |
 		application.MacWindowCollectionBehaviorTransient
