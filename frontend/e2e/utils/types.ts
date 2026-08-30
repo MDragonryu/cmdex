@@ -44,6 +44,7 @@ export type CmdexE2EMethodName =
     | 'SetSettings'
     | 'GetVariables'
     | 'RunCommand'
+    | 'RunCommandInSession'
     | 'ExportCommands'
     | 'ImportCommands'
     | 'SaveThemeTemplate'
@@ -59,11 +60,21 @@ export type CmdexE2EMethodName =
     | 'Resize'
     | 'Clear'
     | 'GetLastOutput'
+    | 'CreateInternalSession'
     | 'GetEventNames'
     | 'GetOS'
     | 'PickDirectory'
     | 'ShowSettingsWindow'
-    | 'ResetAllData';
+    | 'ResetAllData'
+    | 'ApplySettings'
+    | 'GetSessionID'
+    | 'GetStatus'
+    | 'Hide'
+    | 'SetLaunchAtLogin'
+    | 'Show'
+    | 'ShowMainWindow'
+    | 'Toggle'
+    | 'ValidateShortcut';
 
 declare global {
     interface Window {

@@ -35,6 +35,7 @@ const METHOD_IDS = {
   SetSettings: 287946425,
   GetVariables: 4101005934,
   RunCommand: 4143621145,
+  RunCommandInSession: 3885689246,
   ExportCommands: 3360644818,
   ImportCommands: 840325137,
   SaveThemeTemplate: 1489453142,
@@ -50,6 +51,7 @@ const METHOD_IDS = {
   Resize: 270758441,
   Clear: 493646090,
   GetLastOutput: 4011093730,
+  CreateInternalSession: 98262348,
   GetEventNames: 2407475739,
   GetOS: 816844233,
   PickDirectory: 1347829059,
@@ -57,11 +59,31 @@ const METHOD_IDS = {
   ResetAllData: 121210722,
 } as const;
 
-export type MethodName = keyof typeof METHOD_IDS;
+// LauncherService has a method named Resize too, but it is distinct from
+// TerminalService.Resize. Keep its IDs in a second table so the contract test
+// can represent both generated bindings without making the name-based mock
+// dispatcher ambiguous.
+const LAUNCHER_METHOD_IDS = {
+  ApplySettings: 1845488258,
+  GetSessionID: 1892317312,
+  GetStatus: 1596643565,
+  Hide: 2226947441,
+  Resize: 2800369333,
+  SetLaunchAtLogin: 1624648450,
+  Show: 1106717952,
+  ShowMainWindow: 638969109,
+  Toggle: 426529913,
+  ValidateShortcut: 148594645,
+} as const;
+
+export type MethodName = keyof typeof METHOD_IDS | keyof typeof LAUNCHER_METHOD_IDS;
 
 const ID_TO_NAME = new Map<number, MethodName>(
   (Object.entries(METHOD_IDS) as [MethodName, number][]).map(([name, id]) => [id, name]),
 );
+for (const [name, id] of Object.entries(LAUNCHER_METHOD_IDS)) {
+  ID_TO_NAME.set(id, name as MethodName);
+}
 
 // Methods the real Go backend logs-and-returns-empty (or, for RunCommand,
 // never rejects at all — failures are in-band ExitCode:-1 records). Fault
@@ -91,6 +113,9 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   uiFont: 'Inter',
   monoFont: 'JetBrains Mono',
   density: 'comfortable',
+  launcherEnabled: true,
+  launcherShortcut: 'CmdOrCtrl+Shift+K',
+  launchAtLogin: false,
 };
 const settings: Record<string, any> = { ...DEFAULT_SETTINGS };
 
@@ -105,6 +130,28 @@ function uid() {
 }
 
 const now = () => new Date().toISOString();
+
+let launcherSession: {
+  id: string;
+  name: string;
+  running: boolean;
+  shellPath: string;
+  workingDir: string;
+} | null = null;
+
+function getLauncherStatus() {
+  const enabled = settings.launcherEnabled !== false;
+  return {
+    supported: true,
+    enabled,
+    registered: enabled,
+    shortcut: settings.launcherShortcut || 'CmdOrCtrl+Shift+K',
+    error: '',
+    warning: '',
+    launchAtLogin: settings.launchAtLogin === true,
+    platform: 'darwin',
+  };
+}
 
 // ── Fault injection ──────────────────────────────────────────────────────
 const failureMap = new Map<MethodName, { message: string; once: boolean }>();
@@ -509,6 +556,21 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
     return record;
   },
 
+  RunCommandInSession: (commandID: string, variables: Record<string, string>, _sessionID: string) => {
+    const cmd = findCommand(commandID);
+    return {
+      id: uid(),
+      commandId: commandID,
+      scriptContent: cmd?.scriptContent || '',
+      finalCmd: 'echo mock execution',
+      output: `Mock output: ${JSON.stringify(variables)}`,
+      error: '',
+      exitCode: 0,
+      workingDir: '',
+      executedAt: now(),
+    };
+  },
+
   // ── Import / Export ──────────────────────────────────────
   ExportCommands: () => {},
 
@@ -534,6 +596,14 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
     }
     return createMockTerminalSession();
   },
+
+  CreateInternalSession: (name: string) => ({
+    id: `internal-${uid()}`,
+    name: name || 'Internal',
+    running: true,
+    shellPath: '/bin/mock-shell',
+    workingDir: '/mock/path',
+  }),
 
   ListSessions: () => terminalSessions,
 
@@ -570,7 +640,11 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
     terminalCallCounts.Write++;
   },
 
-  Resize: (_sessionId: string, _cols: number, _rows: number) => {
+  Resize: (sessionId: string | boolean, _cols?: number, _rows?: number) => {
+    // LauncherService.Resize shares the Go method name with this terminal
+    // method but only receives the expanded flag. Both IDs dispatch here;
+    // only terminal resizes affect terminal call-count assertions.
+    if (typeof sessionId === 'boolean') return;
     terminalCallCounts.Resize++;
   },
 
@@ -583,6 +657,42 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
 
   GetLastOutput: () => ({ ...lastOutputResult }),
 
+  // ── Launcher ────────────────────────────────────────────
+  ApplySettings: () => getLauncherStatus(),
+
+  GetSessionID: () => {
+    if (!launcherSession) {
+      launcherSession = {
+        id: `launcher-${uid()}`,
+        name: 'Launcher',
+        running: true,
+        shellPath: '/bin/mock-shell',
+        workingDir: '/mock/path',
+      };
+    }
+    return launcherSession.id;
+  },
+
+  GetStatus: () => getLauncherStatus(),
+
+  Hide: () => {},
+
+  SetLaunchAtLogin: (enabled: boolean) => {
+    settings.launchAtLogin = enabled;
+  },
+
+  Show: () => {},
+
+  ShowMainWindow: () => {},
+
+  Toggle: () => {},
+
+  ValidateShortcut: (accelerator: string) => {
+    if (!accelerator || !accelerator.includes('+')) {
+      throw new Error('shortcut must include a modifier');
+    }
+  },
+
   // ── Events ───────────────────────────────────────────────
   GetEventNames: () => ({
     openSettings: 'open-settings',
@@ -590,6 +700,8 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
     settingsChanged: 'settings-changed',
     settingsWindowClosing: 'settings-window-closing',
     dataReset: 'data-reset',
+    launcherShown: 'launcher-shown',
+    launcherHidden: 'launcher-hidden',
   }),
 
   // ── App ──────────────────────────────────────────────────
@@ -645,6 +757,7 @@ export class CancellablePromise<T> extends Promise<T> {
     resetSettings();
     nextId = 0;
     terminalSessions = [];
+    launcherSession = null;
     activeTerminalSessionId = null;
     terminalSessionCounter = 0;
     terminalCallCounts.CreateSession = 0;
