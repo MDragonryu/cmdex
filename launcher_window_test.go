@@ -15,7 +15,7 @@ func TestPresentLauncherWindowUsesNativePlacementBeforeFocus(t *testing.T) {
 		func() { calls = append(calls, "focus") },
 	)
 
-	want := []string{"prepare", "show", "native-place"}
+	want := []string{"prepare", "show", "native-place", "focus"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("presentation sequence = %v, want %v", calls, want)
 	}
@@ -32,7 +32,7 @@ func TestPresentLauncherWindowNativePlacementIsFinal(t *testing.T) {
 	)
 
 	for _, call := range calls[2:] {
-		if call == "wails-focus" || call == "fallback-place" {
+		if call == "fallback-place" {
 			t.Fatalf("native presentation was followed by %q: %v", call, calls)
 		}
 	}
@@ -51,28 +51,6 @@ func TestPresentLauncherWindowFallsBackWhenNativePlacementUnavailable(t *testing
 	want := []string{"prepare", "show", "native-place", "fallback-place", "focus"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("presentation sequence = %v, want %v", calls, want)
-	}
-}
-
-func TestHideLauncherWindowUsesNativeHideAsFinalOperation(t *testing.T) {
-	var calls []string
-	hideLauncherWindowWith(
-		func() bool { calls = append(calls, "native-hide"); return true },
-		func() { calls = append(calls, "wails-hide") },
-	)
-	if !reflect.DeepEqual(calls, []string{"native-hide"}) {
-		t.Fatalf("hide sequence = %v, want native hide only", calls)
-	}
-}
-
-func TestHideLauncherWindowFallsBackWhenNativeHideUnavailable(t *testing.T) {
-	var calls []string
-	hideLauncherWindowWith(
-		func() bool { calls = append(calls, "native-hide"); return false },
-		func() { calls = append(calls, "wails-hide") },
-	)
-	if !reflect.DeepEqual(calls, []string{"native-hide", "wails-hide"}) {
-		t.Fatalf("hide sequence = %v, want native then Wails fallback", calls)
 	}
 }
 

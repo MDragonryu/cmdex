@@ -2,16 +2,13 @@
 
 package main
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
-func TestPresentLauncherWindowNativeMissingWindowIsSafe(t *testing.T) {
-	if presentLauncherWindowNative("cmdex-launcher-test-window-does-not-exist", launcherWidth, launcherHeight, launcherTopFraction, true) {
-		t.Fatal("native presenter reported success for a missing window")
-	}
-}
-
-func TestPrepareLauncherWindowNativeMissingWindowIsSafe(t *testing.T) {
-	if prepareLauncherWindowNative("cmdex-launcher-test-window-does-not-exist") {
-		t.Fatal("native preparer reported success for a missing window")
+func TestPositionLauncherWindowNativeMissingWindowIsSafe(t *testing.T) {
+	if positionLauncherWindowNative(unsafe.Pointer(nil), launcherWidth, launcherHeight, launcherTopFraction, 0) {
+		t.Fatal("native positioner reported success for a missing window")
 	}
 }

@@ -122,9 +122,28 @@ func TestLauncherMacCollectionBehaviorSupportsFullscreenAcrossSpaces(t *testing.
 	want := application.MacWindowCollectionBehaviorCanJoinAllSpaces |
 		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
 		application.MacWindowCollectionBehaviorIgnoresCycle |
-		application.MacWindowCollectionBehaviorTransient
+		application.MacWindowCollectionBehaviorStationary
 	if launcherMacCollectionBehavior != want {
 		t.Fatalf("launcher collection behavior = %d, want %d", launcherMacCollectionBehavior, want)
+	}
+}
+
+func TestLauncherUsesNonActivatingPanelPolicy(t *testing.T) {
+	mac := launcherMacOptions()
+	if mac.WindowClass != application.MacWindowClassPanel {
+		t.Fatalf("launcher window class = %v, want NSPanel", mac.WindowClass)
+	}
+	if !mac.PanelPreferences.NonActivating {
+		t.Fatal("launcher panel must be non-activating")
+	}
+	if mac.PanelPreferences.BecomesKeyOnlyIfNeeded {
+		t.Fatal("launcher panel must become key when explicitly focused")
+	}
+	if !mac.PanelPreferences.FloatingPanel {
+		t.Fatal("launcher panel must use floating-panel behavior")
+	}
+	if mac.CollectionBehavior != launcherMacCollectionBehavior {
+		t.Fatalf("launcher collection behavior = %d, want %d", mac.CollectionBehavior, launcherMacCollectionBehavior)
 	}
 }
 

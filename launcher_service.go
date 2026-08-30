@@ -37,14 +37,13 @@ const (
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
 
-	// launcherMacCollectionBehavior lets the launcher overlay an unrelated
+	// launcherMacCollectionBehavior lets the panel overlay an unrelated
 	// fullscreen app while remaining available on every Space. MoveToActiveSpace
-	// is intentionally omitted: Wails can otherwise move the launcher into
-	// Cmdex's old Space while making it key.
+	// is intentionally omitted: it can move the launcher into Cmdex's Space.
 	launcherMacCollectionBehavior = application.MacWindowCollectionBehaviorCanJoinAllSpaces |
 		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
 		application.MacWindowCollectionBehaviorIgnoresCycle |
-		application.MacWindowCollectionBehaviorTransient
+		application.MacWindowCollectionBehaviorStationary
 
 	// launcherTopFraction positions the window in the upper portion of the
 	// screen's work area, the way Spotlight and Raycast do.
@@ -55,6 +54,23 @@ const (
 	// raised. Without it the launcher can hide itself the moment it appears.
 	launcherBlurGrace = 300 * time.Millisecond
 )
+
+func launcherMacOptions() application.MacWindow {
+	return application.MacWindow{
+		// Wails creates a real non-activating NSPanel on macOS. Show and Focus
+		// then order and key only this panel without activating CmDex or
+		// replacing the active app's menu bar.
+		WindowClass: application.MacWindowClassPanel,
+		PanelPreferences: application.MacPanelPreferences{
+			NonActivating:          true,
+			BecomesKeyOnlyIfNeeded: false,
+			FloatingPanel:          true,
+		},
+		WindowLevel:             application.MacWindowLevelFloating,
+		CollectionBehavior:      launcherMacCollectionBehavior,
+		InvisibleTitleBarHeight: 0,
+	}
+}
 
 // LauncherStatus describes the state of the global shortcut for the settings UI.
 type LauncherStatus struct {
@@ -226,13 +242,7 @@ func (s *LauncherService) createWindowLocked() {
 			launcherBackgroundBlue,
 			launcherBackgroundAlpha,
 		),
-		Mac: application.MacWindow{
-			// Float above ordinary windows and follow the user onto whichever
-			// Space or full-screen app is active, the way Spotlight does.
-			WindowLevel:             application.MacWindowLevelFloating,
-			CollectionBehavior:      launcherMacCollectionBehavior,
-			InvisibleTitleBarHeight: 0,
-		},
+		Mac: launcherMacOptions(),
 	}
 
 	w := wailsApp.Window.NewWithOptions(options)
@@ -252,10 +262,10 @@ func (s *LauncherService) createWindowLocked() {
 
 // ========== Window control ==========
 
-// Show reveals and focuses the launcher. On macOS the native presenter selects
-// the pointer's display before activation and presents the window on all Spaces
-// (including an unrelated fullscreen app); other platforms use the Wails screen
-// API fallback.
+// Show reveals and focuses the launcher. On macOS Wails' non-activating panel
+// semantics keep the previously active app active while the native positioning
+// helper selects the display under the pointer. Other platforms use the Wails
+// screen API fallback.
 func (s *LauncherService) Show() {
 	s.mu.Lock()
 	s.createWindowLocked()
@@ -268,20 +278,17 @@ func (s *LauncherService) Show() {
 	}
 
 	application.InvokeAsync(func() {
-		prepared := false
+		var targetDisplay uint32
 		presentLauncherWindow(
-			func() { prepared = prepareLauncherWindowNative(launcherWindowTitle) },
+			func() { targetDisplay = launcherDisplayUnderMouseNative() },
 			func() { w.Show() },
 			func() bool {
-				if !prepared {
-					return false
-				}
-				return presentLauncherWindowNative(
-					launcherWindowTitle,
+				return positionLauncherWindowNative(
+					w.NativeWindow(),
 					launcherWidth,
 					launcherHeight,
 					launcherTopFraction,
-					true,
+					targetDisplay,
 				)
 			},
 			func() { s.positionWindow(w, launcherHeight) },
@@ -292,7 +299,8 @@ func (s *LauncherService) Show() {
 	})
 }
 
-// Hide conceals the launcher without destroying it or its terminal session.
+// Hide conceals only the launcher panel without activating or focusing the
+// main Cmdex window, and without destroying the panel or its terminal session.
 func (s *LauncherService) Hide() {
 	s.mu.Lock()
 	w := s.window
@@ -301,22 +309,9 @@ func (s *LauncherService) Hide() {
 		return
 	}
 	application.InvokeAsync(func() {
-		hideLauncherWindow(w)
+		w.Hide()
 		wailsApp.Event.Emit(eventNames.LauncherHidden)
 	})
-}
-
-func hideLauncherWindow(w *application.WebviewWindow) {
-	hideLauncherWindowWith(
-		func() bool { return hideLauncherWindowNative(launcherWindowTitle) },
-		func() { w.Hide() },
-	)
-}
-
-func hideLauncherWindowWith(nativeHide func() bool, fallbackHide func()) {
-	if !nativeHide() {
-		fallbackHide()
-	}
 }
 
 // Toggle shows the launcher when hidden and hides it when visible. This is what
@@ -350,7 +345,7 @@ func (s *LauncherService) Resize(expanded bool) {
 
 	application.InvokeAsync(func() {
 		w.SetSize(launcherWidth, height)
-		if !presentLauncherWindowNative(launcherWindowTitle, launcherWidth, height, launcherTopFraction, false) {
+		if !positionLauncherWindowNative(w.NativeWindow(), launcherWidth, height, launcherTopFraction, 0) {
 			s.positionWindow(w, height)
 		}
 	})
