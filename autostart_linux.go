@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const autostartFileMode = 0o600
+
 func autostartDesktopPath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -100,7 +102,7 @@ func setAutostart(enabled bool) error {
 		"",
 	}, "\n")
 
-	if err := writeAutostartFile(path, []byte(entry), 0o600); err != nil {
+	if err := writeAutostartFile(path, []byte(entry), autostartFileMode); err != nil {
 		return fmt.Errorf("write login item: %w", err)
 	}
 	return nil

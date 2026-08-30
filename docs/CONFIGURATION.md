@@ -54,7 +54,7 @@ Controls the spacing and compactness of the UI.
 
 ## 3. Terminal Behaviour
 
-Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal.
+Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal. A legacy `terminal` key found in an older settings JSON blob is ignored; it is not a persisted `AppSettings` field.
 
 The shell used for each session is chosen by the backend — `$SHELL` on macOS/Linux (falling back to `/bin/sh`), `cmd` on Windows.
 

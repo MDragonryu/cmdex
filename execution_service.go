@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -118,12 +119,8 @@ func (s *ExecutionService) resolveScript(cmd Command, variables map[string]strin
 	if eval == nil {
 		eval = NewExecutor()
 	}
-	for name, value := range eval.EvalDefaults(cmd.Variables) {
-		resolved[name] = value
-	}
-	for name, value := range variables {
-		resolved[name] = value
-	}
+	maps.Copy(resolved, eval.EvalDefaults(cmd.Variables))
+	maps.Copy(resolved, variables)
 	for _, definition := range cmd.Variables {
 		if strings.TrimSpace(resolved[definition.Name]) == "" {
 			return "", fmt.Errorf("missing required variable: %s", definition.Name)

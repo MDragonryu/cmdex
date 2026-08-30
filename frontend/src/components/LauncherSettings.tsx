@@ -68,7 +68,7 @@ const LauncherSettings: React.FC = () => {
   // repainting the current status.
   const enqueueSettings = useCallback(<T,>(operation: () => Promise<T>): Promise<QueuedSettingsResult<T>> => {
     return settingsQueue.enqueue(operation);
-  }, []);
+  }, [settingsQueue]);
 
   const refresh = useCallback(async () => {
     const generation = settingsQueue.invalidate();
@@ -78,7 +78,7 @@ const LauncherSettings: React.FC = () => {
     } catch (err) {
       console.error('launcher settings: GetStatus failed', err);
     }
-  }, []);
+  }, [settingsQueue]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set from the promise callback
