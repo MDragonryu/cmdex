@@ -60,21 +60,21 @@ const LauncherSettings: React.FC = () => {
   const [capturing, setCapturing] = useState(false);
   const [pendingShortcut, setPendingShortcut] = useState('');
   const captureRef = useRef<HTMLInputElement>(null);
-  const settingsQueueRef = useRef(createLatestAsyncQueue());
+  const [settingsQueue] = useState(createLatestAsyncQueue);
 
   // Wails calls are asynchronous and settings updates are partial merges. A
   // small FIFO makes rapid toggles/shortcut captures last-write-wins, while
   // the generation check prevents an older ApplySettings response from
   // repainting the current status.
   const enqueueSettings = useCallback(<T,>(operation: () => Promise<T>): Promise<QueuedSettingsResult<T>> => {
-    return settingsQueueRef.current.enqueue(operation);
+    return settingsQueue.enqueue(operation);
   }, []);
 
   const refresh = useCallback(async () => {
-    const generation = settingsQueueRef.current.invalidate();
+    const generation = settingsQueue.invalidate();
     try {
       const next = await GetStatus() as LauncherStatus;
-      if (settingsQueueRef.current.isCurrent(generation)) setStatus(next);
+      if (settingsQueue.isCurrent(generation)) setStatus(next);
     } catch (err) {
       console.error('launcher settings: GetStatus failed', err);
     }
