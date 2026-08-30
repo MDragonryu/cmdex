@@ -94,12 +94,15 @@ picker (`Ctrl+Cmd+Space`), and the Windows/Linux window menu (`Alt+Space`).
 - `↑`/`↓` move the selection, `Enter` runs the highlighted command, `Esc` closes.
 - Commands with `{{variables}}` open the same variable-entry dialog the main
   window uses; commands without variables run immediately.
-- Commands run in the launcher's **own terminal session**, streaming into a
-  panel below the search field. That session is hidden from the main window's
-  terminal tabs. `Esc` returns from the output panel to the search field.
+- Commands run in the launcher's **own persistent terminal session**, which is
+  started once with the app and reused for every invocation. It streams into a
+  panel below the search field and is hidden from the main window's terminal
+  tabs. `Esc` returns from the output panel to the search field.
 - The launcher hides when it loses focus. Its window and terminal session are
   created once and reused, so reopening is instant and previous output is
-  retained.
+  retained. The regular terminal tabs and their actions (including Copy Last
+  Output and Clear) remain unchanged; only the launcher's internal session is
+  hidden.
 
 ### Accelerator format
 

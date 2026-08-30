@@ -169,9 +169,12 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     activation = activationRef.current,
   ) => {
     try {
-      const id = sessionId || (await GetSessionID());
+      // The backend eagerly creates one hidden PTY with the app. Ask for the
+      // current ID for every run so a closed session can be replaced without
+      // ever creating a duplicate from the frontend.
+      const id = await GetSessionID();
       if (activation !== activationRef.current) return;
-      if (!sessionId) setSessionId(id);
+      if (id !== sessionId) setSessionId(id);
 
       setStage('running');
       setRanCommand(cmd);
@@ -353,6 +356,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
                 isVisible
                 theme={theme}
                 sessionId={sessionId}
+                initiallyRunning
               />
             )}
           </div>

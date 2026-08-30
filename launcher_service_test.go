@@ -285,8 +285,13 @@ func TestLauncherServiceStartupDisabledDoesNotRegister(t *testing.T) {
 	useLauncherHotkeyManager(t, manager)
 
 	previousWailsApp := wailsApp
+	previousTerminalSvc := terminalSvc
 	wailsApp = nil
-	t.Cleanup(func() { wailsApp = previousWailsApp })
+	terminalSvc = nil
+	t.Cleanup(func() {
+		wailsApp = previousWailsApp
+		terminalSvc = previousTerminalSvc
+	})
 
 	service := &LauncherService{}
 	if err := service.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
@@ -302,6 +307,57 @@ func TestLauncherServiceStartupDisabledDoesNotRegister(t *testing.T) {
 	}
 	if status := service.GetStatus(); status.Enabled || status.Registered {
 		t.Fatalf("startup status = %+v, want disabled and unregistered", status)
+	}
+}
+
+func TestLauncherServiceStartupEagerlyCreatesOneSession(t *testing.T) {
+	launcherTestDB(t)
+	manager := &recordingLauncherHotkeyManager{}
+	useLauncherHotkeyManager(t, manager)
+
+	previousWailsApp := wailsApp
+	previousTerminalSvc := terminalSvc
+	wailsApp = nil
+	terminalSvc = nil
+	t.Cleanup(func() {
+		wailsApp = previousWailsApp
+		terminalSvc = previousTerminalSvc
+	})
+
+	var mu sync.Mutex
+	creates := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			mu.Lock()
+			creates++
+			mu.Unlock()
+			return &SessionInfo{ID: "launcher-eager", Name: "Launcher", Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "launcher-eager" },
+	}
+	if err := service.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
+		t.Fatalf("ServiceStartup failed: %v", err)
+	}
+	t.Cleanup(func() { _ = service.ServiceShutdown() })
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		id, err := service.GetSessionID()
+		if err == nil {
+			if id != "launcher-eager" {
+				t.Fatalf("eager session ID = %q", id)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("eager session did not become available: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if creates != 1 {
+		t.Fatalf("eager startup created %d sessions, want 1", creates)
 	}
 }
 
@@ -354,5 +410,212 @@ func TestLauncherServiceApplySettingsWaitsForPreviousApplication(t *testing.T) {
 		if status.Platform == "" {
 			t.Error("concurrent ApplySettings returned an empty platform")
 		}
+	}
+}
+
+func TestLauncherSessionEagerCreationReusesOneSession(t *testing.T) {
+	var creates int
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			creates++
+			return &SessionInfo{ID: "launcher-1", Name: "Launcher", Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "launcher-1" },
+		sessionShutdown: make(chan struct{}),
+	}
+
+	first, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("first GetSessionID failed: %v", err)
+	}
+	second, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("second GetSessionID failed: %v", err)
+	}
+	if first != "launcher-1" || second != first {
+		t.Fatalf("session IDs = %q, %q, want the same precreated ID", first, second)
+	}
+	if creates != 1 {
+		t.Fatalf("createSession called %d times, want 1", creates)
+	}
+}
+
+func TestLauncherSessionConcurrentGetIsSingleFlight(t *testing.T) {
+	var mu sync.Mutex
+	creates := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			mu.Lock()
+			creates++
+			mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			return &SessionInfo{ID: "launcher-concurrent", Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "launcher-concurrent" },
+		sessionShutdown: make(chan struct{}),
+	}
+
+	const callers = 16
+	ids := make(chan string, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := service.GetSessionID()
+			ids <- id
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent GetSessionID failed: %v", err)
+		}
+	}
+	for id := range ids {
+		if id != "launcher-concurrent" {
+			t.Fatalf("concurrent GetSessionID returned %q", id)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if creates != 1 {
+		t.Fatalf("createSession called %d times, want 1", creates)
+	}
+}
+
+func TestLauncherSessionFailureThenLazyRecovery(t *testing.T) {
+	var mu sync.Mutex
+	creates := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			mu.Lock()
+			creates++
+			attempt := creates
+			mu.Unlock()
+			if attempt == 1 {
+				return nil, errors.New("shell unavailable")
+			}
+			return &SessionInfo{ID: "launcher-recovered", Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "launcher-recovered" },
+		sessionShutdown: make(chan struct{}),
+	}
+
+	if _, err := service.ensureSession(time.Second); err == nil {
+		t.Fatal("eager session failure returned nil error")
+	}
+	if status := service.GetStatus(); !strings.Contains(status.Error, "launcher terminal unavailable") {
+		t.Fatalf("status = %+v, want startup error", status)
+	}
+	id, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("lazy recovery failed: %v", err)
+	}
+	if id != "launcher-recovered" {
+		t.Fatalf("recovered ID = %q", id)
+	}
+	if status := service.GetStatus(); status.Error != "" {
+		t.Fatalf("recovered status = %+v, want cleared session error", status)
+	}
+}
+
+func TestLauncherSessionClosedIDIsReplacedAndClosed(t *testing.T) {
+	active := map[string]bool{}
+	var closed []string
+	creates := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			creates++
+			id := "launcher-1"
+			if creates > 1 {
+				id = "launcher-2"
+			}
+			active[id] = true
+			return &SessionInfo{ID: id, Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return active[id] },
+		closeSessionFn: func(id string) error {
+			closed = append(closed, id)
+			delete(active, id)
+			return nil
+		},
+		sessionShutdown: make(chan struct{}),
+	}
+
+	first, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("initial GetSessionID failed: %v", err)
+	}
+	delete(active, first)
+	second, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("replacement GetSessionID failed: %v", err)
+	}
+	if second == first || len(closed) != 1 || closed[0] != first {
+		t.Fatalf("replacement = %q, closed = %v, want old ID closed once", second, closed)
+	}
+}
+
+func TestLauncherSessionReusesIDDuringTerminalRestart(t *testing.T) {
+	creates := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			creates++
+			return &SessionInfo{ID: "launcher-restarting", Running: false}, nil
+		},
+		// TerminalService keeps the session record while its PTY is being
+		// restarted, so the ID remains valid and Write can reuse it.
+		sessionExistsFn: func(id string) bool { return id == "launcher-restarting" },
+		sessionShutdown: make(chan struct{}),
+	}
+
+	first, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("initial GetSessionID failed: %v", err)
+	}
+	second, err := service.GetSessionID()
+	if err != nil {
+		t.Fatalf("restart GetSessionID failed: %v", err)
+	}
+	if first != second || creates != 1 {
+		t.Fatalf("restart IDs = %q, %q and creates = %d, want one reused ID", first, second, creates)
+	}
+}
+
+func TestLauncherSessionShutdownClosesExactlyOneSession(t *testing.T) {
+	closed := 0
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			return &SessionInfo{ID: "launcher-shutdown", Running: true}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "launcher-shutdown" },
+		closeSessionFn: func(id string) error {
+			if id != "launcher-shutdown" {
+				t.Fatalf("closed unexpected session %q", id)
+			}
+			closed++
+			return nil
+		},
+		sessionShutdown: make(chan struct{}),
+	}
+	if _, err := service.GetSessionID(); err != nil {
+		t.Fatalf("GetSessionID failed: %v", err)
+	}
+	if err := service.ServiceShutdown(); err != nil {
+		t.Fatalf("ServiceShutdown failed: %v", err)
+	}
+	if err := service.ServiceShutdown(); err != nil {
+		t.Fatalf("second ServiceShutdown failed: %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("closeSession called %d times, want exactly 1", closed)
+	}
+	if _, err := service.GetSessionID(); err == nil {
+		t.Fatal("GetSessionID succeeded after shutdown")
 	}
 }

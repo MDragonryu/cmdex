@@ -36,6 +36,11 @@ const (
 	launcherMinimumAcceleratorParts = 2
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
+	// launcherSessionRecoveryTimeout bounds frontend waiters while the eager
+	// launcher shell is starting (or being recovered after a failed startup).
+	// The creator itself is never abandoned: if it eventually succeeds after a
+	// timeout, it publishes the session for the next invocation.
+	launcherSessionRecoveryTimeout = 5 * time.Second
 
 	// launcherMacCollectionBehavior lets the panel overlay an unrelated
 	// fullscreen app while remaining available on every Space. MoveToActiveSpace
@@ -156,6 +161,19 @@ var newLauncherHotkeyManager = func() launcherHotkeyManager {
 // state or respawns a shell.
 type LauncherService struct {
 	mu sync.Mutex
+	// sessionMu serializes launcher-session creation/replacement independently
+	// from window and shortcut state. This is intentionally single-flight: the
+	// eager startup and concurrent GetSessionID calls must never create two
+	// hidden PTYs.
+	sessionMu          sync.Mutex
+	sessionCreating    bool
+	sessionDone        chan struct{}
+	sessionShutdown    chan struct{}
+	sessionShuttingDown bool
+	sessionErr         string
+	createSessionFn    func() (*SessionInfo, error)
+	closeSessionFn     func(string) error
+	sessionExistsFn    func(string) bool
 	// applyMu serializes the complete settings application transaction. In
 	// particular, the settings read must stay ordered with unregister,
 	// register, and the final status publication when startup and frontend
@@ -172,11 +190,21 @@ type LauncherService struct {
 	status             LauncherStatus
 }
 
+type launcherSessionResult struct {
+	info *SessionInfo
+	err  error
+}
+
 // ServiceStartup creates the launcher window up front (hidden) and applies the
 // persisted launcher settings.
 func (s *LauncherService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	s.hotkeys = newLauncherHotkeyManager()
 	launcherSvc = s
+	s.sessionMu.Lock()
+	if s.sessionShutdown == nil {
+		s.sessionShutdown = make(chan struct{})
+	}
+	s.sessionMu.Unlock()
 
 	// App.ServiceStartup normally initializes wailsApp first. Keeping window
 	// creation conditional makes the lifecycle seam safe for unit tests too.
@@ -192,10 +220,17 @@ func (s *LauncherService) ServiceStartup(ctx context.Context, options applicatio
 	if wailsApp != nil && wailsApp.Event != nil {
 		s.stopStart = wailsApp.Event.OnApplicationEvent(
 			events.Common.ApplicationStarted,
-			func(*application.ApplicationEvent) { s.ApplySettings() },
+			func(*application.ApplicationEvent) {
+				// TerminalService is registered before LauncherService. Starting
+				// here ensures its shell integration and default user session are
+				// ready, while keeping app startup responsive.
+				go s.ensureSession(launcherSessionRecoveryTimeout)
+				s.ApplySettings()
+			},
 		)
 	} else {
 		// The nil-app path is used by unit tests which inject the manager seam.
+		go s.ensureSession(launcherSessionRecoveryTimeout)
 		go s.ApplySettings()
 	}
 	return nil
@@ -213,6 +248,23 @@ func (s *LauncherService) ServiceShutdown() error {
 		s.registeredShortcut = ""
 	}
 	s.applyMu.Unlock()
+
+	s.sessionMu.Lock()
+	if !s.sessionShuttingDown {
+		s.sessionShuttingDown = true
+		if s.sessionShutdown != nil {
+			close(s.sessionShutdown)
+		}
+	}
+	id := s.sessionID
+	s.sessionID = ""
+	s.sessionMu.Unlock()
+	if id != "" {
+		s.closeLauncherSession(id)
+	}
+	// A creator that is already in the backend cannot be cancelled safely, but
+	// it observes sessionShuttingDown and closes any late result. Waiters are
+	// woken by sessionShutdown above; do not block shutdown on PTY startup.
 	return nil
 }
 
@@ -394,40 +446,170 @@ func (s *LauncherService) ShowMainWindow() {
 
 // ========== Terminal session ==========
 
-// GetSessionID returns the launcher's dedicated terminal session, creating it on
-// first use. The session is internal, so it never appears as a tab in the main
-// window and never becomes the main window's active session.
+// GetSessionID returns the launcher's eagerly-created dedicated terminal
+// session. If eager startup failed, one bounded single-flight recovery attempt
+// is made on demand. A session removed from TerminalService is never returned
+// as a stale ID.
 func (s *LauncherService) GetSessionID() (string, error) {
-	s.mu.Lock()
-	existing := s.sessionID
-	s.mu.Unlock()
-	if existing != "" {
-		return existing, nil
-	}
+	return s.ensureSession(launcherSessionRecoveryTimeout)
+}
 
-	if terminalSvc == nil {
-		return "", errors.New("terminal service not initialized")
-	}
-
-	info, err := terminalSvc.CreateInternalSession("Launcher")
-	if err != nil {
-		return "", fmt.Errorf("create launcher terminal session: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Another caller may have won the race; keep the first session and discard
-	// this one so only a single launcher session ever exists.
-	if s.sessionID != "" {
-		go func() {
-			if err := terminalSvc.CloseSession(info.ID); err != nil {
-				fmt.Printf("close duplicate launcher terminal session %s: %v\n", info.ID, err)
+// ensureSession is the single-flight session creator used by eager startup
+// and GetSessionID. It deliberately does not hold sessionMu while starting a
+// PTY: the bounded waiters can observe shutdown and the backend can perform
+// its blocking shell setup without blocking window operations.
+func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for recovery := 0; recovery < 2; recovery++ {
+		s.sessionMu.Lock()
+		if s.sessionShuttingDown {
+			s.sessionMu.Unlock()
+			return "", errors.New("launcher service is shutting down")
+		}
+		if s.sessionID != "" && s.sessionExists(s.sessionID) {
+			id := s.sessionID
+			s.sessionMu.Unlock()
+			return id, nil
+		}
+		staleID := s.sessionID
+		if staleID != "" {
+			s.sessionID = ""
+		}
+		if s.sessionCreating {
+			done := s.sessionDone
+			shutdown := s.sessionShutdown
+			s.sessionMu.Unlock()
+			if staleID != "" {
+				s.closeLauncherSession(staleID)
 			}
+			select {
+			case <-done:
+				continue
+			case <-shutdown:
+				return "", errors.New("launcher service is shutting down")
+			case <-deadline.C:
+				return "", errors.New("launcher terminal startup timed out")
+			}
+		}
+
+		s.sessionCreating = true
+		s.sessionDone = make(chan struct{})
+		done := s.sessionDone
+		sessionShutdown := s.sessionShutdown
+		create := s.createLauncherSession
+		s.sessionMu.Unlock()
+
+		if staleID != "" {
+			s.closeLauncherSession(staleID)
+		}
+		result := make(chan launcherSessionResult, 1)
+		go func() {
+			info, err := create()
+			s.completeSessionCreate(done, info, err)
+			result <- launcherSessionResult{info: info, err: err}
 		}()
-		return s.sessionID, nil
+		var info *SessionInfo
+		var err error
+		select {
+		case created := <-result:
+			info, err = created.info, created.err
+		case <-sessionShutdown:
+			return "", errors.New("launcher service is shutting down")
+		case <-deadline.C:
+			return "", errors.New("launcher terminal startup timed out")
+		}
+		if err != nil {
+			return "", fmt.Errorf("create launcher terminal session: %w", err)
+		}
+		if info == nil {
+			return "", errors.New("create launcher terminal session: empty session response")
+		}
+		if sessionShutdown != nil {
+			select {
+			case <-sessionShutdown:
+				return "", errors.New("launcher service is shutting down")
+			default:
+			}
+		}
+		return info.ID, nil
 	}
-	s.sessionID = info.ID
-	return s.sessionID, nil
+	return "", errors.New("launcher terminal startup timed out")
+}
+
+func (s *LauncherService) completeSessionCreate(done chan struct{}, info *SessionInfo, err error) {
+	s.sessionMu.Lock()
+	s.sessionCreating = false
+	if err == nil && info != nil && !s.sessionShuttingDown {
+		s.sessionID = info.ID
+	} else if err != nil {
+		s.sessionErr = fmt.Sprintf("launcher terminal unavailable: %v", err)
+	} else if info == nil {
+		s.sessionErr = "launcher terminal unavailable: empty session response"
+	}
+	shuttingDown := s.sessionShuttingDown
+	close(done)
+	s.sessionMu.Unlock()
+
+	if err != nil {
+		s.publishSessionError(fmt.Sprintf("launcher terminal unavailable: %v", err))
+	} else if info == nil {
+		s.publishSessionError("launcher terminal unavailable: empty session response")
+	} else if !shuttingDown {
+		s.publishSessionError("")
+	}
+	if shuttingDown && err == nil && info != nil {
+		s.closeLauncherSession(info.ID)
+	}
+}
+
+func (s *LauncherService) createLauncherSession() (*SessionInfo, error) {
+	if s.createSessionFn != nil {
+		return s.createSessionFn()
+	}
+	if terminalSvc == nil {
+		return nil, errors.New("terminal service not initialized")
+	}
+	return terminalSvc.CreateInternalSession("Launcher")
+}
+
+func (s *LauncherService) closeLauncherSession(id string) {
+	if id == "" {
+		return
+	}
+	closeFn := s.closeSessionFn
+	if closeFn == nil && terminalSvc != nil {
+		closeFn = terminalSvc.CloseSession
+	}
+	if closeFn != nil {
+		if err := closeFn(id); err != nil {
+			fmt.Printf("close launcher terminal session %s: %v\n", id, err)
+		}
+	}
+}
+
+func (s *LauncherService) sessionExists(id string) bool {
+	// Existence, rather than the transient Running bit, is the ownership
+	// signal here. TerminalService auto-restarts unintentional shell exits and
+	// Write lazily restarts an intentionally stopped shell; replacing during
+	// either hand-off would create an unnecessary second PTY.
+	if s.sessionExistsFn != nil {
+		return s.sessionExistsFn(id)
+	}
+	return terminalSvc != nil && terminalSvc.hasSession(id)
+}
+
+func (s *LauncherService) publishSessionError(message string) {
+	s.sessionMu.Lock()
+	previous := s.sessionErr
+	s.sessionErr = message
+	s.sessionMu.Unlock()
+
+	s.mu.Lock()
+	if message != "" || s.status.Error == previous {
+		s.status.Error = message
+	}
+	s.mu.Unlock()
 }
 
 // ========== Settings & shortcut registration ==========
@@ -465,6 +647,9 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 		Platform:  runtime.GOOS,
 		Shortcut:  DefaultLauncherShortcut,
 	}
+	s.sessionMu.Lock()
+	status.Error = s.sessionErr
+	s.sessionMu.Unlock()
 
 	settings, err := db.GetSettings()
 	if err != nil {

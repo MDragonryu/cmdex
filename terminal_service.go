@@ -494,6 +494,20 @@ func (s *TerminalService) GetActiveSession() *SessionInfo {
 	return ss.info()
 }
 
+// hasSession reports whether an ID is still owned by TerminalService. It is
+// intentionally private: launcher recovery uses it to avoid returning an ID
+// after CloseSession removed the internal PTY, while the public API continues
+// to expose only user-visible session inventory.
+func (s *TerminalService) hasSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.mu.RLock()
+	_, ok := s.sessions[id]
+	s.mu.RUnlock()
+	return ok
+}
+
 // ========== Per-Session PTY Lifecycle ==========
 
 // startSessionLocked starts a PTY shell for the given session.

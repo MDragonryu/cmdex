@@ -115,4 +115,25 @@ test.describe('Launcher', () => {
     await expect(page.locator('.launcher-results')).toBeVisible();
     await expect(page.getByRole('option', { name: /Search me/ })).toBeVisible();
   });
+
+  test('reuses one launcher session across repeated executions while preserving normal terminal actions', async ({ page, seed }) => {
+    await seed({ commands: [command('launcher-run', 'Run me')] });
+    await openLauncher(page);
+
+    await page.getByRole('option', { name: /Run me/ }).click();
+    await expect(page.locator('.launcher-run-panel')).toBeVisible();
+    const firstID = await page.evaluate(() => window.__cmdexE2E!.launcherSessionId);
+
+    await page.evaluate(() => window.__cmdexE2E!.invokeLauncher('Show'));
+    await expect(page.locator('.launcher-results')).toBeVisible();
+    await page.getByRole('option', { name: /Run me/ }).click();
+    await expect(page.locator('.launcher-run-panel')).toBeVisible();
+    const secondID = await page.evaluate(() => window.__cmdexE2E!.launcherSessionId);
+
+    expect(secondID).toBe(firstID);
+    const launcherSessionCalls = await page.evaluate(() =>
+      window.__cmdexE2E!.callLog.filter((entry) => entry.method === 'GetSessionID').length,
+    );
+    expect(launcherSessionCalls).toBe(2);
+  });
 });

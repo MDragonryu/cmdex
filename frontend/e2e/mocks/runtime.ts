@@ -604,13 +604,21 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
     return createMockTerminalSession();
   },
 
-  CreateInternalSession: (name: string) => ({
-    id: `internal-${uid()}`,
-    name: name || 'Internal',
-    running: true,
-    shellPath: '/bin/mock-shell',
-    workingDir: '/mock/path',
-  }),
+  // Production creates the launcher's internal session during app startup.
+  // Keep the mock persistent too: GetSessionID should consume this stable
+  // object rather than manufacturing a new session for every invocation.
+  CreateInternalSession: (name: string) => {
+    if (!launcherSession) {
+      launcherSession = {
+        id: `internal-${uid()}`,
+        name: name || 'Internal',
+        running: true,
+        shellPath: '/bin/mock-shell',
+        workingDir: '/mock/path',
+      };
+    }
+    return launcherSession;
+  },
 
   ListSessions: () => terminalSessions,
 

@@ -71,7 +71,7 @@ Eight services are registered as `application.Service` in `main.go` — not a si
 | `importexport_service.go` | `ImportExportService`: `ExportCommands`/`ImportCommands`, `SaveThemeTemplate` |
 | `event_service.go` | `EventService`: `GetEventNames` — exposes the `EventNames` constants so the frontend never hardcodes event strings |
 | `terminal_service.go` | `TerminalService`: multi-session PTY terminals (create/close/rename/activate, write, resize, clear, start/stop). `MaxSessions = 10` |
-| `launcher_service.go` | `LauncherService`: global launcher window, shortcut registration, launch-at-login, and its internal terminal session |
+| `launcher_service.go` | `LauncherService`: global launcher window, shortcut registration, launch-at-login, and its one persistent internal terminal session (eagerly started after `TerminalService`) |
 | `pty_backend.go`, `pty_backend_unix.go`, `pty_backend_windows.go`, `pty_backend_mock.go` | PTY abstraction (`ptyHandle`/`ptyProcess`) per platform: `creack/pty` on Unix, `charmbracelet/x/conpty` on Windows, plus a mock backend for tests |
 | `pty_env.go` | `buildPtyEnv`: supplies `TERM`/`COLORTERM`/`LANG` etc. that launchd-started GUI apps don't inherit, and merges shell-integration env |
 | `shell_integration.go` | Materializes the embedded `shell-integration/` scripts to `~/.cmdex` and activates OSC 133 markers in the session shell via a per-session nonce |
