@@ -4,7 +4,7 @@
 
 CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 19 + TypeScript** frontend. All data is stored locally in a **SQLite** database with no external services or cloud dependencies.
 
-The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals, and the launcher) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and two auxiliary UIs: the settings window and the global launcher window.
+The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals, and the launcher) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and three native-window UIs: the main editor, settings, and global launcher.
 
 The defining architectural fact: **commands are not run by a Go subprocess helper.** They are typed into a live pseudo-terminal, exactly as if the user had typed them. Everything about output handling, interactivity, and signal delivery follows from that.
 
@@ -360,7 +360,7 @@ Running commands by writing to a live PTY (rather than `exec`ing a temp script a
 
 ### 2. Wails v3 over v2
 
-Wails v3 introduces service-based registration (`application.NewService`) and an improved event system. Seven focused services replace v2's monolithic `App` struct.
+Wails v3 introduces service-based registration (`application.NewService`) and an improved event system. Eight focused services replace v2's monolithic `App` struct.
 
 ### 3. Pure-Go SQLite (`modernc.org/sqlite`)
 
@@ -370,9 +370,9 @@ Avoiding CGO keeps cross-compilation simple and ships a single static binary wit
 
 All React state lives in `App.tsx` with hooks and refs. For a single-user desktop app with no server, Redux/Zustand would add ceremony without benefit.
 
-### 5. Two-window architecture
+### 5. Three-window architecture
 
-Settings render in a separate native window (`/?window=settings`) rather than a modal, keeping the main UI uncluttered and letting the user close settings without disturbing editor context.
+Settings render in a separate native window (`/?window=settings`) rather than a modal, keeping the main UI uncluttered and letting the user close settings without disturbing editor context. The global launcher renders in its own persistent window (`/?window=launcher`) so its command palette and PTY remain available while the main editor stays hidden or focused elsewhere.
 
 ### 6. Inactive editor tabs stay mounted
 

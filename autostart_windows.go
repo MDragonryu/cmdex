@@ -14,11 +14,24 @@ const autostartRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 // autostartValueName is the registry value holding the CmDex launch command.
 const autostartValueName = "CmDex"
 
+type autostartRegistryKey interface {
+	Close() error
+	DeleteValue(name string) error
+	SetStringValue(name, value string) error
+}
+
+var openOrCreateAutostartKey = func() (autostartRegistryKey, error) {
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, autostartRunKey, registry.SET_VALUE)
+	return key, err
+}
+
 // setAutostart adds or removes the HKCU Run entry. HKCU needs no elevation.
 func setAutostart(enabled bool) error {
-	key, err := registry.OpenKey(registry.CURRENT_USER, autostartRunKey, registry.SET_VALUE)
+	// CreateKey is intentionally used instead of OpenKey: the per-user Run key
+	// is not guaranteed to exist on a fresh Windows profile.
+	key, err := openOrCreateAutostartKey()
 	if err != nil {
-		return fmt.Errorf("open Run registry key: %w", err)
+		return fmt.Errorf("open or create Run registry key: %w", err)
 	}
 	defer key.Close()
 

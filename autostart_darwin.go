@@ -60,7 +60,7 @@ func setAutostart(enabled bool) error {
 	plist.WriteString("\t<key>LimitLoadToSessionType</key>\n\t<string>Aqua</string>\n")
 	plist.WriteString("</dict>\n</plist>\n")
 
-	if err := os.WriteFile(path, plist.Bytes(), 0o644); err != nil {
+	if err := writeAutostartFile(path, plist.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("write login item: %w", err)
 	}
 	return nil

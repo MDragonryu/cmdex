@@ -29,6 +29,7 @@ if (isLauncherWindow) {
     // creating and destroying it.
     function LauncherWindow() {
         const [theme, setTheme] = useState('vscode-dark')
+        const settingsGenerationRef = useRef(0)
 
         const applySettings = useCallback((s: Awaited<ReturnType<typeof GetSettings>> | null) => {
             if (!s) return
@@ -41,13 +42,19 @@ if (isLauncherWindow) {
         }, [])
 
         useEffect(() => {
-            GetSettings().then(applySettings).catch(() => {})
+            const generation = ++settingsGenerationRef.current
+            GetSettings().then(settings => {
+                if (generation === settingsGenerationRef.current) applySettings(settings)
+            }).catch(() => {})
         }, [applySettings])
 
         // Stay in sync when preferences change in the settings window.
         useEffect(() => {
             const cleanup = Events.On(eventNames.settingsChanged, () => {
-                GetSettings().then(applySettings).catch(() => {})
+                const generation = ++settingsGenerationRef.current
+                GetSettings().then(settings => {
+                    if (generation === settingsGenerationRef.current) applySettings(settings)
+                }).catch(() => {})
             })
             return () => cleanup()
         }, [applySettings])

@@ -164,6 +164,16 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       const record = await RunCommandInSession(cmd.id, values, id);
       if (record?.error) {
         toast.error(record.error);
+        // Dispatch failures are returned as an ExecutionRecord instead of a
+        // rejected Wails promise. Leave the running panel so the user can
+        // correct the problem and retry from the command list.
+        if (activation === activationRef.current) {
+          setStage('search');
+          setRanCommand(null);
+          Resize(false).catch(() => {});
+          focusSearch();
+        }
+        return;
       }
       // Focus the terminal so Ctrl+C and interactive prompts reach the PTY.
       requestAnimationFrame(() => terminalRef.current?.focus());
@@ -171,8 +181,12 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       if (activation !== activationRef.current) return;
       toast.error('Failed to run command: ' + String(err));
       console.error('launcher: execute failed', err);
+      setStage('search');
+      setRanCommand(null);
+      Resize(false).catch(() => {});
+      focusSearch();
     }
-  }, [sessionId]);
+  }, [sessionId, focusSearch]);
 
   /** Activate the selected result: prompt for variables, or run straight away. */
   const activate = useCallback(async (cmd: Command) => {

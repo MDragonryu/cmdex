@@ -2,7 +2,11 @@
 
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestQuoteDesktopEntryArg(t *testing.T) {
 	tests := []struct {
@@ -24,5 +28,44 @@ func TestQuoteDesktopEntryArg(t *testing.T) {
 				t.Fatalf("quoteDesktopEntryArg(%q) = %q, want %q", tt.arg, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSetAutostartDoesNotFollowExistingSymlink(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	path, err := autostartDesktopPath()
+	if err != nil {
+		t.Fatalf("autostartDesktopPath failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create autostart directory: %v", err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim")
+	original := []byte("do not overwrite")
+	if err := os.WriteFile(victim, original, 0o600); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	if err := os.Symlink(victim, path); err != nil {
+		t.Fatalf("create autostart symlink: %v", err)
+	}
+
+	if err := setAutostart(true); err != nil {
+		t.Fatalf("setAutostart failed: %v", err)
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("read victim: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("victim changed through autostart symlink: got %q, want %q", got, original)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("stat replacement: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("autostart destination remains a symlink")
 	}
 }

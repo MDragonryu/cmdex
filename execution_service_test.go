@@ -136,6 +136,45 @@ func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
 	}
 }
 
+func TestRunCommandInSession_ResolvesDefaultsAndRequiresValues(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
+	initDB := launcherTestDB(t)
+	commandService := &CommandService{}
+	cmd, err := commandService.CreateCommand(
+		"variable command", "", "echo {{greeting}} {{required}}", "", nil,
+		[]VariableDefinition{
+			{Name: "greeting", Default: `"hello"`},
+			{Name: "required"},
+		}, OSPathMap{},
+	)
+	if err != nil {
+		t.Fatalf("CreateCommand failed: %v", err)
+	}
+	t.Cleanup(func() { _ = initDB.DeleteCommand(cmd.ID) })
+
+	session := terminalSvc.GetActiveSession()
+	if session == nil {
+		t.Fatal("test terminal has no active session")
+	}
+	svc := &ExecutionService{}
+	missing := svc.RunCommandInSession(cmd.ID, nil, session.ID)
+	if missing.Error != "missing required variable: required" {
+		t.Fatalf("missing variable error = %q, want required-variable validation", missing.Error)
+	}
+	if missing.ExitCode != -1 {
+		t.Fatalf("missing variable exit code = %d, want -1", missing.ExitCode)
+	}
+
+	resolved := svc.RunCommandInSession(cmd.ID, map[string]string{"required": "world"}, session.ID)
+	if resolved.Error != "" {
+		t.Fatalf("supplied variable error = %q, want empty", resolved.Error)
+	}
+	if !strings.Contains(resolved.FinalCmd, "echo hello world") {
+		t.Fatalf("resolved command = %q, want CEL default and supplied value", resolved.FinalCmd)
+	}
+}
+
 func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 

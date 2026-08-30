@@ -108,6 +108,33 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
+// resolveScript applies the same default and required-variable rules to every
+// execution entry point. A caller may omit a variable when its definition has
+// a literal or CEL default; variables with no usable value are rejected before
+// anything is written to a PTY.
+func (s *ExecutionService) resolveScript(cmd Command, variables map[string]string) (string, error) {
+	resolved := make(map[string]string, len(cmd.Variables)+len(variables))
+	eval := executor
+	if eval == nil {
+		eval = NewExecutor()
+	}
+	for name, value := range eval.EvalDefaults(cmd.Variables) {
+		resolved[name] = value
+	}
+	for name, value := range variables {
+		resolved[name] = value
+	}
+	for _, definition := range cmd.Variables {
+		if strings.TrimSpace(resolved[definition.Name]) == "" {
+			return "", fmt.Errorf("missing required variable: %s", definition.Name)
+		}
+	}
+
+	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, resolved)
+	resolvedScript = stripShebang(resolvedScript)
+	return strings.TrimRight(resolvedScript, "\n"), nil
+}
+
 // RunCommand resolves the command's template variables and writes the
 // resulting command line directly to the active terminal session's PTY
 // via TerminalService.Write. Output streams back through the session's
@@ -123,9 +150,10 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		}
 	}
 
-	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	resolvedScript = stripShebang(resolvedScript)
-	resolvedScript = strings.TrimRight(resolvedScript, "\n")
+	resolvedScript, err := s.resolveScript(cmd, variables)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
 
 	if terminalSvc == nil {
 		return ExecutionRecord{
@@ -181,7 +209,9 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 
 // RunCommandInSession is RunCommand targeted at an explicit terminal session
 // rather than whichever session is active. The global quick launcher uses it
-// so its output stays self-contained in its dedicated internal session.
+// so its output stays self-contained in its dedicated internal session. The
+// ID-addressable behavior is deliberate: internal sessions are a UI
+// visibility/lifecycle convenience, not an access-control boundary.
 func (s *ExecutionService) RunCommandInSession(
 	commandID string,
 	variables map[string]string,
@@ -213,9 +243,10 @@ func (s *ExecutionService) RunCommandInSession(
 		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
 	}
 
-	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	resolvedScript = stripShebang(resolvedScript)
-	resolvedScript = strings.TrimRight(resolvedScript, "\n")
+	resolvedScript, err := s.resolveScript(cmd, variables)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
 	shellPath := ss.info().ShellPath
 	if shellPath == "" {
 		shellPath, _ = detectShell()

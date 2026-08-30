@@ -100,7 +100,7 @@ func setAutostart(enabled bool) error {
 		"",
 	}, "\n")
 
-	if err := os.WriteFile(path, []byte(entry), 0o600); err != nil {
+	if err := writeAutostartFile(path, []byte(entry), 0o600); err != nil {
 		return fmt.Errorf("write login item: %w", err)
 	}
 	return nil

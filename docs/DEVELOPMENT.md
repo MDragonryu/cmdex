@@ -80,7 +80,7 @@ cmdex/
 
 **Key files to know:**
 
-- `main.go` — Defines the main window dimensions, menu bar, and registers all seven backend services.
+- `main.go` — Defines the main window dimensions, menu bar, and registers all eight backend services.
 - `app.go` — Holds `ServiceStartup` / `ServiceShutdown`, creates the settings window, and owns the package-level `db` / `executor` / `terminalSvc` / `wailsApp` variables every other service reads.
 - `execution_service.go` — Where "run a command" actually lives. Note that it dispatches into the terminal rather than executing anything itself; `executor.go`, despite the name, executes nothing.
 - `terminal_service.go` — The largest and most subtle file: session lifecycle, PTY read loops, and the concurrency rules around `sessionState`.
@@ -381,4 +381,3 @@ Every pull request triggers the [CI workflow](.github/workflows/ci.yml), but onl
 | **Build check** | `task build` cross-platform build verification | Ubuntu, macOS, Windows | manual (`workflow_dispatch`) |
 
 The two automatic checks must pass before a PR can be merged; the manual jobs are triggered explicitly (e.g. before a release) rather than gating every PR. The CI caches Go modules, pnpm dependencies, Wails CLI, and platform-specific build tools (GTK, NSIS) to keep run times fast.
-

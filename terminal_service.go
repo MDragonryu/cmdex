@@ -848,7 +848,9 @@ func waitForAutoRestartTimer(stopCh <-chan struct{}, timer *time.Timer) bool {
 
 // ========== Session Dispatch Methods ==========
 
-// Write sends input data to the specified session's PTY.
+// Write sends input data to the specified session's PTY. Session IDs are
+// intentionally addressable regardless of the internal flag: internal status
+// controls UI visibility/lifecycle only, not access control.
 func (s *TerminalService) Write(sessionId string, data string) error {
 	ss, err := s.resolveSession(sessionId)
 	if err != nil {

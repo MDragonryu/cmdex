@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { SetSettings } from '../../bindings/cmdex/settingsservice';
+import { createLatestAsyncQueue, type AsyncQueueResult } from '../utils/asyncQueue';
 import {
   ApplySettings,
   GetStatus,
@@ -24,6 +25,8 @@ interface LauncherStatus {
   launchAtLogin: boolean;
   platform: string;
 }
+
+type QueuedSettingsResult<T> = AsyncQueueResult<T>;
 
 /** Turn a keydown into the accelerator format the Go side parses. */
 function acceleratorFromEvent(e: React.KeyboardEvent<HTMLInputElement>): string | null {
@@ -57,10 +60,21 @@ const LauncherSettings: React.FC = () => {
   const [capturing, setCapturing] = useState(false);
   const [pendingShortcut, setPendingShortcut] = useState('');
   const captureRef = useRef<HTMLInputElement>(null);
+  const settingsQueueRef = useRef(createLatestAsyncQueue());
+
+  // Wails calls are asynchronous and settings updates are partial merges. A
+  // small FIFO makes rapid toggles/shortcut captures last-write-wins, while
+  // the generation check prevents an older ApplySettings response from
+  // repainting the current status.
+  const enqueueSettings = useCallback(<T,>(operation: () => Promise<T>): Promise<QueuedSettingsResult<T>> => {
+    return settingsQueueRef.current.enqueue(operation);
+  }, []);
 
   const refresh = useCallback(async () => {
+    const generation = settingsQueueRef.current.invalidate();
     try {
-      setStatus(await GetStatus() as LauncherStatus);
+      const next = await GetStatus() as LauncherStatus;
+      if (settingsQueueRef.current.isCurrent(generation)) setStatus(next);
     } catch (err) {
       console.error('launcher settings: GetStatus failed', err);
     }
@@ -75,18 +89,23 @@ const LauncherSettings: React.FC = () => {
     if (capturing) captureRef.current?.focus();
   }, [capturing]);
 
-  const persist = useCallback(async (patch: Record<string, unknown>) => {
+  const persist = useCallback(async (
+    patch: Record<string, unknown>,
+    validate?: () => Promise<void>,
+  ) => enqueueSettings(async () => {
+    if (validate) await validate();
     await SetSettings(JSON.stringify(patch));
-    const next = await ApplySettings() as LauncherStatus;
-    setStatus(next);
-    return next;
-  }, []);
+    return await ApplySettings() as LauncherStatus;
+  }).then(result => {
+    if (result.current) setStatus(result.value);
+    return result;
+  }), [enqueueSettings]);
 
   const toggleEnabled = useCallback(async (enabled: boolean) => {
     try {
-      const next = await persist({ launcherEnabled: enabled });
-      if (enabled && !next.registered && next.error) {
-        toast.error(next.error);
+      const result = await persist({ launcherEnabled: enabled });
+      if (result.current && enabled && !result.value.registered && result.value.error) {
+        toast.error(result.value.error);
       }
     } catch (err) {
       toast.error(t('settings.launcherSaveFailed', { message: String(err) }));
@@ -98,31 +117,34 @@ const LauncherSettings: React.FC = () => {
   // accelerator that was never actually applied.
   const commitShortcut = useCallback(async (accelerator: string) => {
     try {
-      await ValidateShortcut(accelerator);
-    } catch (err) {
-      toast.error(String(err));
-      setPendingShortcut('');
-      return;
-    }
-    try {
-      const next = await persist({ launcherShortcut: accelerator });
-      if (next.enabled && !next.registered && next.error) {
-        toast.error(next.error);
+      const result = await persist(
+        { launcherShortcut: accelerator },
+        () => ValidateShortcut(accelerator),
+      );
+      if (result.current) {
+        setPendingShortcut('');
+        if (result.value.enabled && !result.value.registered && result.value.error) {
+          toast.error(result.value.error);
+        }
       }
     } catch (err) {
-      toast.error(t('settings.launcherSaveFailed', { message: String(err) }));
+      const message = (err as { message?: unknown })?.message ?? err;
+      toast.error(t('settings.launcherSaveFailed', { message: String(message) }));
       setPendingShortcut('');
     }
   }, [persist, t]);
 
   const toggleLaunchAtLogin = useCallback(async (enabled: boolean) => {
     try {
-      await SetLaunchAtLogin(enabled);
-      await refresh();
+      const result = await enqueueSettings(async () => {
+        await SetLaunchAtLogin(enabled);
+        return await GetStatus() as LauncherStatus;
+      });
+      if (result.current) setStatus(result.value);
     } catch (err) {
       toast.error(t('settings.launchAtLoginFailed', { message: String(err) }));
     }
-  }, [refresh, t]);
+  }, [enqueueSettings, t]);
 
   const handleCaptureKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     e.preventDefault();

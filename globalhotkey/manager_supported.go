@@ -13,13 +13,18 @@ import (
 // unregisterTimeout bounds how long Unregister waits for the platform call.
 // See runOffMainThread for why it can block, and Unregister for why giving up
 // is safe.
-const unregisterTimeout = 2 * time.Second
+var unregisterTimeout = 2 * time.Second
 
 // Manager owns at most one registered global hotkey at a time.
 type Manager struct {
-	mu   sync.Mutex
-	hk   *hotkey.Hotkey
-	stop chan struct{}
+	mu sync.Mutex
+
+	// platformMu remains held by a timed-out unregister until the platform
+	// call actually returns. This prevents a later Register from invoking a
+	// second platform operation while the first one is still in flight.
+	platformMu sync.Mutex
+	hk         *hotkey.Hotkey
+	stop       chan struct{}
 }
 
 // runOffMainThread runs fn on a fresh goroutine and waits for its result.
@@ -65,9 +70,14 @@ func (m *Manager) Register(c Chord, onTrigger func()) error {
 	m.unregisterLocked()
 
 	hk := hotkey.New(mods, key)
+	if !m.lockPlatform(unregisterTimeout) {
+		return fmt.Errorf("register %s: previous hotkey unregister is still in progress", c)
+	}
 	if err := runOffMainThread(hk.Register); err != nil {
+		m.platformMu.Unlock()
 		return fmt.Errorf("register %s: %w", c, err)
 	}
+	m.platformMu.Unlock()
 
 	stop := make(chan struct{})
 	m.hk, m.stop = hk, stop
@@ -87,6 +97,22 @@ func (m *Manager) Register(c Chord, onTrigger func()) error {
 		}
 	}()
 	return nil
+}
+
+// lockPlatform waits for an earlier timed-out platform operation to finish.
+// It returns false rather than blocking forever if the platform event loop is
+// gone; callers can then surface a recoverable registration error.
+func (m *Manager) lockPlatform(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if m.platformMu.TryLock() {
+			return true
+		}
+		if time.Until(deadline) <= 0 {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // Unregister releases the currently registered hotkey, if any. It is safe to
@@ -112,10 +138,12 @@ func (m *Manager) unregisterLocked() {
 	// queue, leaving the platform call with nothing to complete against. Give
 	// up rather than hang the app on quit: the OS tears the hotkey down with
 	// the process anyway.
+	m.platformMu.Lock()
 	done := make(chan struct{})
 	go func() {
 		_ = hk.Unregister()
 		close(done)
+		m.platformMu.Unlock()
 	}()
 	select {
 	case <-done:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cmdex/globalhotkey"
@@ -87,6 +88,8 @@ type LauncherService struct {
 	// register, and the final status publication when startup and frontend
 	// settings changes overlap.
 	applyMu   sync.Mutex
+	loginMu   sync.Mutex
+	loginOp   uint64
 	window    *application.WebviewWindow
 	hotkeys   launcherHotkeyManager
 	sessionID string
@@ -409,6 +412,18 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 // SetLaunchAtLogin installs or removes the platform login item and persists the
 // preference.
 func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
+	// The OS item and its persisted preference are one transaction from the
+	// user's perspective. Serialize independent Wails callers so two toggles
+	// cannot observe/restore each other's intermediate state.
+	op := atomic.AddUint64(&s.loginOp, 1)
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	// If a newer request arrived while this one waited for the lock, let that
+	// request own the final state rather than applying an older user intent.
+	if op != atomic.LoadUint64(&s.loginOp) {
+		return nil
+	}
+
 	previous := autostartEnabled()
 	if err := setAutostart(enabled); err != nil {
 		return err
