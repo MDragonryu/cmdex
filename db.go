@@ -1314,7 +1314,9 @@ func (db *DB) GetSettings() (AppSettings, error) {
 		DefaultWorkingDir: &OSPathMap{},
 		LauncherShortcut:  DefaultLauncherShortcut,
 	}
-	launcherEnabled, launchAtLogin := true, false
+	// The global launcher is opt-in because registration can request macOS
+	// Accessibility permission. Existing persisted values still win below.
+	launcherEnabled, launchAtLogin := false, false
 	defaults.LauncherEnabled = &launcherEnabled
 	defaults.LaunchAtLogin = &launchAtLogin
 	x, y, w, h := -1, -1, 640, 520

@@ -251,7 +251,7 @@
     "shellIntegration": "Shell Integration",
     "shellIntegrationHint": "Enables exact \"copy last output\" by adding OSC 133 markers to new terminal sessions. Takes effect for terminals opened after this is changed.",
     "launcherEnabled": "Global quick launcher",
-    "launcherEnabledHint": "Summon CmDex commands from anywhere with a system-wide shortcut.",
+    "launcherEnabledHint": "Disabled by default; enable it to summon CmDex commands from anywhere with a system-wide shortcut.",
     "launcherShortcut": "Launcher shortcut",
     "launcherShortcutChange": "Change",
     "launcherShortcutCapturing": "Press a key combination…",

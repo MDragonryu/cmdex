@@ -81,7 +81,7 @@ from anywhere in the operating system, without CmDex being focused.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Global quick launcher | Enabled | Registers the system-wide shortcut |
+| Global quick launcher | Disabled | Registers the system-wide shortcut after you explicitly enable it |
 | Launcher shortcut | `Cmd+Shift+K` (macOS) / `Ctrl+Shift+K` (Windows/Linux) | Toggles the launcher |
 | Launch at login | Disabled | Starts CmDex in the background at login |
 
@@ -183,7 +183,7 @@ The `data` column contains a JSON object with the following fields:
 | `windowY` | int | `-1` | Settings window Y position; `-1` = center |
 | `windowWidth` | int | `640` | Settings window width (min: 480) |
 | `windowHeight` | int | `520` | Settings window height (min: 400) |
-| `launcherEnabled` | bool | `true` | Register the system-wide quick launcher shortcut |
+| `launcherEnabled` | bool | `false` | Register the system-wide quick launcher shortcut after explicit opt-in |
 | `launcherShortcut` | string | `"CmdOrCtrl+Shift+K"` | Global launcher accelerator |
 | `launchAtLogin` | bool | `false` | Start CmDex in the background at login |
 
@@ -348,7 +348,7 @@ This section consolidates all default values in one place. These originate from 
 | `defaultWorkingDir` | `{}` (empty OSPathMap; no OS-keyed paths) | `db.go` `GetSettings()` |
 | `windowX` | `-1` (center on screen) | `db.go` `GetSettings()` |
 | `windowY` | `-1` (center on screen) | `db.go` `GetSettings()` |
-| `launcherEnabled` | `true` | `db.go` `GetSettings()` |
+| `launcherEnabled` | `false` | `db.go` `GetSettings()` |
 | `launcherShortcut` | `"CmdOrCtrl+Shift+K"` | `launcher_service.go` `DefaultLauncherShortcut` |
 | `launchAtLogin` | `false` | `db.go` `GetSettings()` |
 | `windowWidth` | `640` | `db.go` `GetSettings()` |

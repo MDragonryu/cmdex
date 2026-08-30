@@ -60,6 +60,19 @@ type LauncherStatus struct {
 	Platform      string `json:"platform"`
 }
 
+// launcherHotkeyManager is the small part of globalhotkey.Manager used by the
+// launcher. Keeping the service dependent on this interface also lets tests
+// verify that disabled startup never reaches the platform registration path.
+type launcherHotkeyManager interface {
+	Supported() bool
+	Register(globalhotkey.Chord, func()) error
+	Unregister()
+}
+
+var newLauncherHotkeyManager = func() launcherHotkeyManager {
+	return globalhotkey.NewManager()
+}
+
 // LauncherService owns the global quick launcher: its always-on-top window, the
 // system-wide shortcut that toggles it, and the dedicated terminal session its
 // commands run in.
@@ -75,7 +88,7 @@ type LauncherService struct {
 	// settings changes overlap.
 	applyMu   sync.Mutex
 	window    *application.WebviewWindow
-	hotkeys   *globalhotkey.Manager
+	hotkeys   launcherHotkeyManager
 	sessionID string
 	shownAt   time.Time
 	status    LauncherStatus
@@ -84,12 +97,16 @@ type LauncherService struct {
 // ServiceStartup creates the launcher window up front (hidden) and applies the
 // persisted launcher settings.
 func (s *LauncherService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
-	s.hotkeys = globalhotkey.NewManager()
+	s.hotkeys = newLauncherHotkeyManager()
 	launcherSvc = s
 
-	s.mu.Lock()
-	s.createWindowLocked()
-	s.mu.Unlock()
+	// App.ServiceStartup normally initializes wailsApp first. Keeping window
+	// creation conditional makes the lifecycle seam safe for unit tests too.
+	if wailsApp != nil {
+		s.mu.Lock()
+		s.createWindowLocked()
+		s.mu.Unlock()
+	}
 
 	// Registration must not happen inline here. ServiceStartup runs on the main
 	// thread before application.Run starts the platform run loop, and the macOS
@@ -348,7 +365,10 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 		return status
 	}
 
-	status.Enabled = settings.LauncherEnabled == nil || *settings.LauncherEnabled
+	// The launcher is opt-in. A nil value can occur in legacy/hand-edited
+	// settings and must remain disabled rather than unexpectedly requesting
+	// macOS Accessibility permission during startup.
+	status.Enabled = settings.LauncherEnabled != nil && *settings.LauncherEnabled
 	status.LaunchAtLogin = autostartEnabled()
 	if settings.LauncherShortcut != "" {
 		status.Shortcut = settings.LauncherShortcut

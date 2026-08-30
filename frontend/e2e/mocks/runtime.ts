@@ -113,7 +113,7 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   uiFont: 'Inter',
   monoFont: 'JetBrains Mono',
   density: 'comfortable',
-  launcherEnabled: true,
+  launcherEnabled: false,
   launcherShortcut: 'CmdOrCtrl+Shift+K',
   launchAtLogin: false,
 };
@@ -140,7 +140,7 @@ let launcherSession: {
 } | null = null;
 
 function getLauncherStatus() {
-  const enabled = settings.launcherEnabled !== false;
+  const enabled = settings.launcherEnabled === true;
   return {
     supported: true,
     enabled,
