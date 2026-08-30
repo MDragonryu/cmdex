@@ -103,7 +103,13 @@ func launcherDisplayUnderMouseNative() uint32 {
 	return uint32(C.launcherDisplayUnderMouse())
 }
 
-func positionLauncherWindowNative(window unsafe.Pointer, width int, height int, topFraction float64, displayID uint32) bool {
+func positionLauncherWindowNative(
+	window unsafe.Pointer,
+	width int,
+	height int,
+	topFraction float64,
+	displayID uint32,
+) bool {
 	return bool(C.positionLauncherPanel(
 		window,
 		C.int(width),
