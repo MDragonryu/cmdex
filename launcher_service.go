@@ -165,15 +165,15 @@ type LauncherService struct {
 	// from window and shortcut state. This is intentionally single-flight: the
 	// eager startup and concurrent GetSessionID calls must never create two
 	// hidden PTYs.
-	sessionMu          sync.Mutex
-	sessionCreating    bool
-	sessionDone        chan struct{}
-	sessionShutdown    chan struct{}
+	sessionMu           sync.Mutex
+	sessionCreating     bool
+	sessionDone         chan struct{}
+	sessionShutdown     chan struct{}
 	sessionShuttingDown bool
-	sessionErr         string
-	createSessionFn    func() (*SessionInfo, error)
-	closeSessionFn     func(string) error
-	sessionExistsFn    func(string) bool
+	sessionErr          string
+	createSessionFn     func() (*SessionInfo, error)
+	closeSessionFn      func(string) error
+	sessionExistsFn     func(string) bool
 	// applyMu serializes the complete settings application transaction. In
 	// particular, the settings read must stay ordered with unregister,
 	// register, and the final status publication when startup and frontend
@@ -224,13 +224,13 @@ func (s *LauncherService) ServiceStartup(ctx context.Context, options applicatio
 				// TerminalService is registered before LauncherService. Starting
 				// here ensures its shell integration and default user session are
 				// ready, while keeping app startup responsive.
-				go s.ensureSession(launcherSessionRecoveryTimeout)
+				go s.startEagerSession()
 				s.ApplySettings()
 			},
 		)
 	} else {
 		// The nil-app path is used by unit tests which inject the manager seam.
-		go s.ensureSession(launcherSessionRecoveryTimeout)
+		go s.startEagerSession()
 		go s.ApplySettings()
 	}
 	return nil
@@ -454,6 +454,18 @@ func (s *LauncherService) GetSessionID() (string, error) {
 	return s.ensureSession(launcherSessionRecoveryTimeout)
 }
 
+func (s *LauncherService) startEagerSession() {
+	if _, err := s.ensureSession(launcherSessionRecoveryTimeout); err != nil && !s.isShuttingDown() {
+		fmt.Printf("launcher terminal startup: %v\n", err)
+	}
+}
+
+func (s *LauncherService) isShuttingDown() bool {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	return s.sessionShuttingDown
+}
+
 // ensureSession is the single-flight session creator used by eager startup
 // and GetSessionID. It deliberately does not hold sessionMu while starting a
 // PTY: the bounded waiters can observe shutdown and the backend can perform
@@ -461,7 +473,7 @@ func (s *LauncherService) GetSessionID() (string, error) {
 func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
-	for recovery := 0; recovery < 2; recovery++ {
+	for range 2 {
 		s.sessionMu.Lock()
 		if s.sessionShuttingDown {
 			s.sessionMu.Unlock()
