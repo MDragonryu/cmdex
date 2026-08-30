@@ -159,7 +159,9 @@ export function Stop(sessionId) {
 }
 
 /**
- * Write sends input data to the specified session's PTY.
+ * Write sends input data to the specified session's PTY. Session IDs are
+ * intentionally addressable regardless of the internal flag: internal status
+ * controls UI visibility/lifecycle only, not access control.
  * @param {string} sessionId
  * @param {string} data
  * @returns {$CancellablePromise<void>}

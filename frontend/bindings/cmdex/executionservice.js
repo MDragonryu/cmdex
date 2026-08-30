@@ -45,7 +45,9 @@ export function RunCommand(commandID, variables) {
 /**
  * RunCommandInSession is RunCommand targeted at an explicit terminal session
  * rather than whichever session is active. The global quick launcher uses it
- * so its output stays self-contained in its dedicated internal session.
+ * so its output stays self-contained in its dedicated internal session. The
+ * ID-addressable behavior is deliberate: internal sessions are a UI
+ * visibility/lifecycle convenience, not an access-control boundary.
  * @param {string} commandID
  * @param {{ [_ in string]?: string }} variables
  * @param {string} sessionID

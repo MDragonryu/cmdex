@@ -114,6 +114,20 @@ func TestFreshSettingsDisableLauncher(t *testing.T) {
 	}
 }
 
+func TestLauncherMacCollectionBehaviorFollowsActiveSpace(t *testing.T) {
+	if launcherMacCollectionBehavior&application.MacWindowCollectionBehaviorCanJoinAllSpaces != 0 {
+		t.Fatal("launcher collection behavior must not join every Space")
+	}
+
+	want := application.MacWindowCollectionBehaviorMoveToActiveSpace |
+		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
+		application.MacWindowCollectionBehaviorIgnoresCycle |
+		application.MacWindowCollectionBehaviorTransient
+	if launcherMacCollectionBehavior != want {
+		t.Fatalf("launcher collection behavior = %d, want %d", launcherMacCollectionBehavior, want)
+	}
+}
+
 func TestSettingsPreserveExplicitLauncherValues(t *testing.T) {
 	testDB := launcherTestDB(t)
 	enabled := true

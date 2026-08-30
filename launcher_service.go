@@ -36,6 +36,15 @@ const (
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
 
+	// launcherMacCollectionBehavior keeps the launcher in the Space where the
+	// shortcut was invoked while allowing it to overlay fullscreen apps. It
+	// deliberately does not use CanJoinAllSpaces: that would leave the window
+	// attached to the Cmdex Space instead of following the active Space.
+	launcherMacCollectionBehavior = application.MacWindowCollectionBehaviorMoveToActiveSpace |
+		application.MacWindowCollectionBehaviorFullScreenAuxiliary |
+		application.MacWindowCollectionBehaviorIgnoresCycle |
+		application.MacWindowCollectionBehaviorTransient
+
 	// launcherTopFraction positions the window in the upper portion of the
 	// screen's work area, the way Spotlight and Raycast do.
 	launcherTopFraction = 0.16
@@ -219,10 +228,8 @@ func (s *LauncherService) createWindowLocked() {
 		Mac: application.MacWindow{
 			// Float above ordinary windows and follow the user onto whichever
 			// Space or full-screen app is active, the way Spotlight does.
-			WindowLevel: application.MacWindowLevelFloating,
-			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
-				application.MacWindowCollectionBehaviorFullScreenAuxiliary |
-				application.MacWindowCollectionBehaviorIgnoresCycle,
+			WindowLevel:             application.MacWindowLevelFloating,
+			CollectionBehavior:      launcherMacCollectionBehavior,
 			InvisibleTitleBarHeight: 0,
 		},
 	}
@@ -244,7 +251,10 @@ func (s *LauncherService) createWindowLocked() {
 
 // ========== Window control ==========
 
-// Show reveals the launcher, positions it on the primary display and focuses it.
+// Show reveals the launcher, moves it to the active Space/display and focuses
+// it. The native macOS presenter is called after Wails shows the window so it
+// can re-order the native window after a global shortcut invocation; other
+// platforms use the Wails screen API fallback.
 func (s *LauncherService) Show() {
 	s.mu.Lock()
 	s.createWindowLocked()
@@ -257,9 +267,14 @@ func (s *LauncherService) Show() {
 	}
 
 	application.InvokeAsync(func() {
-		s.positionWindow(w, launcherHeight)
-		w.Show()
-		w.Focus()
+		presentLauncherWindow(
+			func() { w.Show() },
+			func() bool {
+				return presentLauncherWindowNative(launcherWindowName, launcherHeight, launcherTopFraction)
+			},
+			func() { s.positionWindow(w, launcherHeight) },
+			func() { w.Focus() },
+		)
 		// Tell the UI to reset: focus the search field and select existing text.
 		wailsApp.Event.Emit(eventNames.LauncherShown)
 	})
@@ -310,18 +325,24 @@ func (s *LauncherService) Resize(expanded bool) {
 
 	application.InvokeAsync(func() {
 		w.SetSize(launcherWidth, height)
-		s.positionWindow(w, height)
+		if !presentLauncherWindowNative(launcherWindowName, height, launcherTopFraction) {
+			s.positionWindow(w, height)
+		}
 	})
 }
 
-// positionWindow centres the launcher horizontally and places it in the upper
-// portion of the primary display's work area.
-//
-// Wails beta.12 exposes no public cursor-position API, so "active display"
-// cannot be resolved reliably across platforms; the primary display is used
-// instead. See docs/CONFIGURATION.md for the limitation.
+// positionWindow is the cross-platform fallback for the native macOS
+// presenter. On macOS the native presenter chooses the display containing the
+// current pointer (or the existing window screen when the pointer is between
+// displays), because Wails does not expose a public cursor-position API.
 func (s *LauncherService) positionWindow(w *application.WebviewWindow, height int) {
-	screen := wailsApp.Screen.GetPrimary()
+	var screen *application.Screen
+	if current, err := w.GetScreen(); err == nil {
+		screen = current
+	}
+	if screen == nil && wailsApp != nil && wailsApp.Screen != nil {
+		screen = wailsApp.Screen.GetPrimary()
+	}
 	if screen == nil {
 		w.Center()
 		return
