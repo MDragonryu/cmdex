@@ -11,6 +11,7 @@ import (
 )
 
 const autostartFileMode = 0o644
+const autostartDirectoryMode = 0o700
 
 func autostartPlistPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -43,13 +44,14 @@ func setAutostart(enabled bool) error {
 		return fmt.Errorf("resolve executable symlinks: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), autostartDirectoryMode); err != nil {
 		return fmt.Errorf("create LaunchAgents directory: %w", err)
 	}
 
 	var plist bytes.Buffer
 	plist.WriteString(xml.Header)
-	plist.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
+	plist.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ` +
+		`"http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
 	plist.WriteString("<plist version=\"1.0\">\n<dict>\n")
 	plist.WriteString("\t<key>Label</key>\n\t<string>" + escapeXML(autostartLabel) + "</string>\n")
 	plist.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
