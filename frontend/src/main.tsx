@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client'
 import './i18n'
 import './style.css'
 import { GetSettings, SetSettings } from '../bindings/cmdex/settingsservice'
+import { ResetAllData } from '../bindings/cmdex/commandservice'
 import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
@@ -137,6 +138,40 @@ if (isSettingsWindow) {
             persistSettings(newSettings)
         }, [syncCustomThemes, locale, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight, handleThemeChange])
 
+        const handleResetAllData = useCallback(async () => {
+            await ResetAllData()
+            // db.ResetAll truncates app_settings too, so every field this
+            // window holds in local state is now stale — not just
+            // customThemes. handleThemeChange/handleImportTheme/
+            // handleRemoveCustomTheme all close over theme/lastDarkTheme/
+            // lastLightTheme/uiFont/monoFont/density/locale and persist them
+            // verbatim; a stale `theme` in particular can point at a
+            // since-deleted custom theme id, and importing a new theme
+            // afterward fires two unordered persistSettings() writes
+            // (one from handleImportTheme, one from the onThemeChange call
+            // right after it) where the stale one can finish last and
+            // persist a dangling theme id. Re-sync everything from the
+            // fresh post-reset settings before telling the main window to
+            // reload too.
+            const s = await GetSettings().catch(() => null)
+            const t = s?.theme || 'vscode-dark'
+            setTheme(t)
+            setDensity(s?.density || 'comfortable')
+            setUiFont(s?.uiFont || 'Inter')
+            setMonoFont(s?.monoFont || 'JetBrains Mono')
+            setLocale(s?.locale || 'en')
+            setLastDarkTheme(s?.lastDarkTheme || 'vscode-dark')
+            setLastLightTheme(s?.lastLightTheme || 'vscode-light')
+            syncCustomThemes([])
+            applyTheme(t, null)
+            applyDensity(s?.density || 'comfortable')
+            applyFonts(s?.uiFont || 'Inter', s?.monoFont || 'JetBrains Mono')
+            // The main window is holding stale commands/categories *and*
+            // stale settings — tell it to reload both rather than requiring a
+            // restart.
+            Events.Emit(eventNames.dataReset)
+        }, [syncCustomThemes])
+
         return (
             <SettingsPage
                 theme={theme}
@@ -144,6 +179,7 @@ if (isSettingsWindow) {
                 customThemes={customThemes}
                 onImportTheme={handleImportTheme}
                 onRemoveCustomTheme={handleRemoveCustomTheme}
+                onResetAllData={handleResetAllData}
                 density={density}
                 uiFont={uiFont}
                 monoFont={monoFont}
