@@ -21,8 +21,6 @@ type launcherFrame struct {
 func centeredLauncherFrame(screen launcherScreenBounds, width, height int, topFraction float64) launcherFrame {
 	x := screen.X + (screen.Width-width)/launcherCenterDivisor
 	y := screen.Y + screen.Height - int(float64(screen.Height)*topFraction) - height
-	if y < screen.Y {
-		y = screen.Y
-	}
+	y = max(y, screen.Y)
 	return launcherFrame{X: x, Y: y, Width: width, Height: height}
 }

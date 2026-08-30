@@ -276,7 +276,13 @@ func (s *LauncherService) Show() {
 				if !prepared {
 					return false
 				}
-				return presentLauncherWindowNative(launcherWindowTitle, launcherWidth, launcherHeight, launcherTopFraction, true)
+				return presentLauncherWindowNative(
+					launcherWindowTitle,
+					launcherWidth,
+					launcherHeight,
+					launcherTopFraction,
+					true,
+				)
 			},
 			func() { s.positionWindow(w, launcherHeight) },
 			func() { w.Focus() },

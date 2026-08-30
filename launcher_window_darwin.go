@@ -200,7 +200,13 @@ func prepareLauncherWindowNative(title string) bool {
 func presentLauncherWindowNative(title string, width int, height int, topFraction float64, useMouseScreen bool) bool {
 	nativeTitle := C.CString(title)
 	defer C.free(unsafe.Pointer(nativeTitle))
-	return bool(C.presentLauncherWindowNative(nativeTitle, C.int(width), C.int(height), C.double(topFraction), C.bool(useMouseScreen)))
+	return bool(C.presentLauncherWindowNative(
+		nativeTitle,
+		C.int(width),
+		C.int(height),
+		C.double(topFraction),
+		C.bool(useMouseScreen),
+	))
 }
 
 func hideLauncherWindowNative(title string) bool {
