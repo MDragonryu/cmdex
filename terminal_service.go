@@ -791,8 +791,6 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 
 	ss.mu.Lock()
 	intentional := ss.intentionalStop || exitCode == 0
-	cols := int(ss.lastSize.Cols)
-	rows := int(ss.lastSize.Rows)
 	ss.mu.Unlock()
 
 	if wailsApp != nil {
@@ -822,6 +820,11 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 		ss.mu.Unlock()
 		return
 	}
+	// Resize may have run while the restart delay was pending. Read the latest
+	// dimensions while holding ss.mu immediately before starting the replacement
+	// PTY, rather than reusing the size captured before the delay.
+	cols := int(ss.lastSize.Cols)
+	rows := int(ss.lastSize.Rows)
 	err := s.startSessionLocked(ss, cols, rows)
 	ss.mu.Unlock()
 	if err != nil {
@@ -832,7 +835,7 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 // waitForAutoRestart waits for the crash-restart delay unless the owning
 // session is stopped first. Keeping the timer selection separate makes the
 // cancellation behavior deterministic to test without sleeping in a test.
-func waitForAutoRestart(stopCh <-chan struct{}) bool {
+var waitForAutoRestart = func(stopCh <-chan struct{}) bool {
 	return waitForAutoRestartTimer(stopCh, time.NewTimer(autoRestartDelay))
 }
 

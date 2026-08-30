@@ -5,8 +5,34 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// decodeDesktopEntryQuotedArg models the two unquoting passes described by
+// the Desktop Entry Exec specification: general string escaping followed by
+// quoted-argument escaping. It is deliberately test-only; the production
+// writer is checked against the parser semantics rather than a copied list of
+// expected slash counts.
+func decodeDesktopEntryQuotedArg(encoded string) string {
+	if len(encoded) < 2 || encoded[0] != '"' || encoded[len(encoded)-1] != '"' {
+		return encoded
+	}
+	value := encoded[1 : len(encoded)-1]
+	for pass := 0; pass < 2; pass++ {
+		var decoded strings.Builder
+		for i := 0; i < len(value); i++ {
+			if value[i] == '\\' && i+1 < len(value) {
+				decoded.WriteByte(value[i+1])
+				i++
+				continue
+			}
+			decoded.WriteByte(value[i])
+		}
+		value = decoded.String()
+	}
+	return value
+}
 
 func TestQuoteDesktopEntryArg(t *testing.T) {
 	tests := []struct {
@@ -17,7 +43,7 @@ func TestQuoteDesktopEntryArg(t *testing.T) {
 		{name: "spaces", arg: "/opt/CmDex App/cmdex", want: `"/opt/CmDex App/cmdex"`},
 		{name: "field code marker", arg: "/opt/100%/cmdex", want: `"/opt/100%%/cmdex"`},
 		{name: "desktop metacharacters", arg: "/opt/CmDex\\\"" + "`" + "/cmdex", want: `"` + `/opt/CmDex\\\"` + "\\`" + `/cmdex"`},
-		{name: "literal backslash", arg: `/opt/CmDex\bin/cmdex`, want: `"/opt/CmDex\\bin/cmdex"`},
+		{name: "literal backslash", arg: `/opt/CmDex\bin/cmdex`, want: `"/opt/CmDex\\\\bin/cmdex"`},
 		{name: "literal dollar sign", arg: `/opt/$CmDex/cmdex`, want: `"/opt/\\$CmDex/cmdex"`},
 		{name: "control characters", arg: "/opt/CmDex\tApp\ncmdex", want: `"/opt/CmDex\tApp\ncmdex"`},
 	}
@@ -26,6 +52,22 @@ func TestQuoteDesktopEntryArg(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := quoteDesktopEntryArg(tt.arg); got != tt.want {
 				t.Fatalf("quoteDesktopEntryArg(%q) = %q, want %q", tt.arg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestQuoteDesktopEntryArgRoundTripsReservedCharacters(t *testing.T) {
+	tests := []string{
+		`/opt/CmDex\bin/cmdex`,
+		`/opt/$CmDex/cmdex`,
+		`/opt/CmDex\$bin/cmdex`,
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			encoded := quoteDesktopEntryArg(input)
+			if got := decodeDesktopEntryQuotedArg(encoded); got != input {
+				t.Fatalf("quoteDesktopEntryArg(%q) round-tripped as %q (encoded %q)", input, got, encoded)
 			}
 		})
 	}

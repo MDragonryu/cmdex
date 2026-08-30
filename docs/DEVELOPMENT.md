@@ -49,7 +49,8 @@ cmdex/
 ├── settings_service.go        # User preferences persistence
 ├── importexport_service.go    # Data import / export
 ├── event_service.go           # Wails event name constants
-├── terminal_service.go        # Multi-session PTY terminals (MaxSessions = 10)
+├── terminal_service.go        # Multi-session PTY terminals (10 user-visible sessions)
+├── launcher_service.go        # Global launcher window, shortcut, and launch-at-login
 ├── pty_backend*.go            # PTY abstraction: creack/pty (Unix), ConPTY (Windows), mock
 ├── pty_env.go                 # TERM/COLORTERM/LANG for launchd-started GUI processes
 ├── shell_integration.go       # OSC 133 activation via embedded shell startup scripts
@@ -152,6 +153,7 @@ Cmdex uses Wails v3 **Services**. Each service is a struct registered in `main.g
 | `ImportExportService` | `importexport_service.go` | JSON import / export |
 | `EventService` | `event_service.go` | Event name constants |
 | `TerminalService` | `terminal_service.go` | Multi-session PTY terminals, output capture |
+| `LauncherService` | `launcher_service.go` | Global launcher window, shortcut, launch-at-login, and internal terminal |
 
 All services receive a `ServiceStartup` context for initialization and `ServiceShutdown` for cleanup.
 

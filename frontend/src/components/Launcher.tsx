@@ -110,6 +110,23 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     });
   }, []);
 
+  const resetForShow = useCallback(() => {
+    // A launcher window is persistent, so showing it again must establish a
+    // fresh transaction even when the previous invocation was in the variable
+    // prompt or terminal stage. Invalidate pending GetVariables/execute work
+    // before clearing its state so an older promise cannot repopulate the UI.
+    activationRef.current += 1;
+    setQuery('');
+    setActiveIndex(0);
+    setStage('search');
+    setPendingCommand(null);
+    setVariables([]);
+    setRanCommand(null);
+    Resize(false).catch(() => {});
+    loadData();
+    focusSearch();
+  }, [focusSearch, loadData]);
+
   // Every time the window is revealed: refresh the command list (it may have
   // changed in the main window), focus the field and select any existing text
   // so typing replaces the previous query.
@@ -120,11 +137,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   useEffect(() => {
     if (!eventsInitialized) return;
     const cleanup = Events.On(eventNames.launcherShown, () => {
-      loadData();
-      focusSearch();
+      resetForShow();
     });
     return () => cleanup();
-  }, [eventsInitialized, loadData, focusSearch]);
+  }, [eventsInitialized, resetForShow]);
 
   useEffect(() => {
     focusSearch();

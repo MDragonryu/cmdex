@@ -749,12 +749,12 @@ UI and session limit, but session IDs remain addressable by the normal terminal
 and execution bindings; this is a UI/lifecycle convenience, not an access
 control boundary.
 
-#### `Show()` / `Hide()` / `Toggle()`
+### `Show()` / `Hide()` / `Toggle()`
 
 Shows, hides, or toggles the launcher window. `Resize(expanded)` switches
 between the search-only and inline-terminal sizes.
 
-#### `GetSessionID()`
+### `GetSessionID()`
 
 Returns (and lazily creates) the launcher's dedicated internal terminal session.
 
@@ -763,13 +763,13 @@ const sessionId: string = await GetSessionID();
 await RunCommandInSession(command.id, variables, sessionId);
 ```
 
-#### `GetStatus()` / `ApplySettings()`
+### `GetStatus()` / `ApplySettings()`
 
 Reads or applies the persisted launcher shortcut and enabled state. Applying
 settings re-registers the global shortcut and reports registration failures in
 `LauncherStatus.error` rather than rejecting.
 
-#### `ValidateShortcut(accelerator: string)` / `SetLaunchAtLogin(enabled: boolean)`
+### `ValidateShortcut(accelerator: string)` / `SetLaunchAtLogin(enabled: boolean)`
 
 Validates an accelerator without changing registration. `SetLaunchAtLogin`
 installs or removes the per-user login item and persists the preference.

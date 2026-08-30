@@ -241,6 +241,8 @@ function resolveSessionId(id: string): string | null {
 }
 
 const eventListeners: Record<string, Array<(event: any) => void>> = {};
+let launcherVisible = false;
+const launcherEventLog: Array<{ name: string; data: any }> = [];
 
 export const Events = {
   On(eventName: string, callback: (event: any) => void) {
@@ -263,6 +265,9 @@ export const Events = {
   // paths are faithful to production.
   Emit(eventName: string, data: any) {
     const event = { name: eventName, data, sender: 'e2e-mock' };
+    if (eventName === 'launcher-shown' || eventName === 'launcher-hidden') {
+      launcherEventLog.push({ name: eventName, data });
+    }
     (eventListeners[eventName] || []).forEach((fn) => fn(event));
   },
   Off(eventName: string) {
@@ -675,17 +680,30 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
 
   GetStatus: () => getLauncherStatus(),
 
-  Hide: () => {},
+  Hide: () => {
+    launcherVisible = false;
+    // Production LauncherService emits these events without a payload after
+    // the native window operation completes. Keep the mock's envelope and
+    // payload semantics identical so launcher reset tests exercise the real
+    // cross-window contract.
+    Events.Emit('launcher-hidden', undefined);
+  },
 
   SetLaunchAtLogin: (enabled: boolean) => {
     settings.launchAtLogin = enabled;
   },
 
-  Show: () => {},
+  Show: () => {
+    launcherVisible = true;
+    Events.Emit('launcher-shown', undefined);
+  },
 
   ShowMainWindow: () => {},
 
-  Toggle: () => {},
+  Toggle: () => {
+    if (launcherVisible) handlersByName.Hide();
+    else handlersByName.Show();
+  },
 
   ValidateShortcut: (accelerator: string) => {
     if (!accelerator || !accelerator.includes('+')) {
@@ -758,6 +776,8 @@ export class CancellablePromise<T> extends Promise<T> {
     nextId = 0;
     terminalSessions = [];
     launcherSession = null;
+    launcherVisible = false;
+    launcherEventLog.length = 0;
     activeTerminalSessionId = null;
     terminalSessionCounter = 0;
     terminalCallCounts.CreateSession = 0;
@@ -856,6 +876,16 @@ export class CancellablePromise<T> extends Promise<T> {
   setLastOutput(data: { available: boolean; text: string; exitCode: number; truncated: boolean }) {
     lastOutputResult = { ...data };
   },
+  // Exercise LauncherService.Show/Hide/Toggle through the same name-based
+  // dispatcher used by generated bindings, while exposing enough state to
+  // assert the native-window event contract.
+  invokeLauncher(method: 'Show' | 'Hide' | 'Toggle') {
+    handlersByName[method]();
+  },
+  get launcherVisible() {
+    return launcherVisible;
+  },
+  launcherEventLog,
 };
 
 // Read seed data injected via addInitScript before app initializes

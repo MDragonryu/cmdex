@@ -117,6 +117,9 @@ declare global {
             setPickDirectoryResult(path: string): void;
             // Configure GetLastOutput's next return value.
             setLastOutput(data: { available: boolean; text: string; exitCode: number; truncated: boolean }): void;
+            invokeLauncher(method: 'Show' | 'Hide' | 'Toggle'): void;
+            launcherVisible: boolean;
+            launcherEventLog: Array<{ name: string; data: unknown }>;
         };
     }
 }
