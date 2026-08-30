@@ -34,9 +34,10 @@ export function ApplySettings() {
 }
 
 /**
- * GetSessionID returns the launcher's dedicated terminal session, creating it on
- * first use. The session is internal, so it never appears as a tab in the main
- * window and never becomes the main window's active session.
+ * GetSessionID returns the launcher's eagerly-created dedicated terminal
+ * session. If eager startup failed, one bounded single-flight recovery attempt
+ * is made on demand. A session removed from TerminalService is never returned
+ * as a stale ID.
  * @returns {$CancellablePromise<string>}
  */
 export function GetSessionID() {
@@ -54,7 +55,8 @@ export function GetStatus() {
 }
 
 /**
- * Hide conceals the launcher without destroying it or its terminal session.
+ * Hide conceals only the launcher panel without activating or focusing the
+ * main Cmdex window, and without destroying the panel or its terminal session.
  * @returns {$CancellablePromise<void>}
  */
 export function Hide() {
@@ -82,10 +84,10 @@ export function SetLaunchAtLogin(enabled) {
 }
 
 /**
- * Show reveals and focuses the launcher. On macOS the native presenter selects
- * the pointer's display before activation and presents the window on all Spaces
- * (including an unrelated fullscreen app); other platforms use the Wails screen
- * API fallback.
+ * Show reveals and focuses the launcher. On macOS Wails' non-activating panel
+ * semantics keep the previously active app active while the native positioning
+ * helper selects the display under the pointer. Other platforms use the Wails
+ * screen API fallback.
  * @returns {$CancellablePromise<void>}
  */
 export function Show() {
