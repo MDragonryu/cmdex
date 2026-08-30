@@ -61,6 +61,11 @@ const (
 	autoRestartDelay = 100 * time.Millisecond
 )
 
+// sessionReadyTimeout bounds a dispatch waiting for another goroutine to
+// finish starting or restarting a PTY. A backend that never returns must not
+// hold a launcher command indefinitely.
+var sessionReadyTimeout = 5 * time.Second
+
 // SessionInfo is the public metadata for a terminal session, sent to the frontend.
 type SessionInfo struct {
 	ID         string `json:"id"`
@@ -97,6 +102,9 @@ type sessionState struct {
 	stopCh          chan struct{}
 	running         bool
 	starting        bool
+	startDone       chan struct{}
+	startDoneClosed bool
+	startErr        error
 	intentionalStop bool
 	closed          bool
 	// generation counts how many times Stop/CloseSession have invalidated
@@ -423,6 +431,7 @@ func (s *TerminalService) CloseSession(id string) error {
 	ss.proc = nil
 	ss.running = false
 	ss.closed = true
+	ss.signalStartDoneLocked()
 	ss.mu.Unlock()
 	s.mu.Unlock()
 
@@ -494,6 +503,9 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		return nil
 	}
 	ss.starting = true
+	ss.startDone = make(chan struct{})
+	ss.startDoneClosed = false
+	ss.startErr = nil
 	// Snapshotted before unlocking below for the blocking shell-integration
 	// setup and ptyBackend.Start calls — see the staleness check once
 	// relocked, and the generation field's own comment for why this exists.
@@ -565,7 +577,6 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
 
 	ss.mu.Lock()
-	ss.starting = false
 
 	// Stop or CloseSession bumped ss.generation while we were unlocked
 	// above — the caller already asked to stop this session, so the PTY
@@ -576,6 +587,11 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	// s.sessions), leaking a real shell process and its would-be
 	// readLoop/monitorExit goroutines with no way to ever stop them again.
 	if stale := ss.generation != startGen; stale || err != nil {
+		startErr := err
+		if stale {
+			startErr = errors.New("session stopped while starting")
+		}
+		ss.finishStartLocked(startErr)
 		ss.mu.Unlock()
 		if nonceFileCleanup != nil {
 			nonceFileCleanup()
@@ -587,10 +603,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 			}
 		}
 		ss.mu.Lock()
-		if stale {
-			return errors.New("session stopped while starting")
-		}
-		return err
+		return startErr
 	}
 
 	// The integration script deletes the nonce file itself within
@@ -615,8 +628,26 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.readerWg.Add(1)
 	go ss.readLoop(handle, stopCh, integrated)
 	go s.monitorExit(ss, proc, stopCh)
+	ss.finishStartLocked(nil)
 
 	return nil
+}
+
+// signalStartDoneLocked wakes dispatchers waiting for a lifecycle transition.
+// It is safe to call this from Stop/CloseSession while the actual backend
+// start is still running; the in-flight start will observe generation and
+// discard its result when it reacquires ss.mu.
+func (ss *sessionState) signalStartDoneLocked() {
+	if ss.startDone != nil && !ss.startDoneClosed {
+		close(ss.startDone)
+		ss.startDoneClosed = true
+	}
+}
+
+func (ss *sessionState) finishStartLocked(err error) {
+	ss.startErr = err
+	ss.starting = false
+	ss.signalStartDoneLocked()
 }
 
 // stopSessionLocked signals the session's goroutines to stop by closing stopCh.
@@ -860,32 +891,86 @@ func (s *TerminalService) Write(sessionId string, data string) error {
 		return err
 	}
 
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-
-	if ss.closed {
-		return fmt.Errorf("session closed: %s", sessionId)
-	}
-
-	if !ss.running {
-		if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
-			return err
+	for {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return fmt.Errorf("session closed: %s", sessionId)
 		}
-	}
 
-	if ss.ptmx == nil {
-		return errors.New("terminal not started")
-	}
+		// monitorExit holds ss.mu while it transitions through the restart
+		// lifecycle, but startSessionLocked releases it around the blocking
+		// backend call. Waiting here closes that window for dispatchers: they
+		// cannot mistake the intentionally empty hand-off state for a dead
+		// terminal and report the intermittent "terminal not started" error.
+		if ss.starting {
+			done := ss.startDone
+			generation := ss.generation
+			ss.mu.Unlock()
+			if err := waitForSessionReady(done); err != nil {
+				return err
+			}
 
-	b := []byte(data)
-	for len(b) > 0 {
-		n, err := ss.ptmx.Write(b)
-		if err != nil {
-			return err
+			ss.mu.Lock()
+			if ss.closed {
+				ss.mu.Unlock()
+				return fmt.Errorf("session closed: %s", sessionId)
+			}
+			if ss.generation != generation {
+				ss.mu.Unlock()
+				return errors.New("session stopped while starting")
+			}
+			startErr := ss.startErr
+			running := ss.running
+			started := ss.ptmx != nil
+			ss.mu.Unlock()
+			if startErr != nil {
+				return startErr
+			}
+			if !running || !started {
+				return errors.New("terminal not started")
+			}
+			continue
 		}
-		b = b[n:]
+
+		if !ss.running {
+			if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
+				ss.mu.Unlock()
+				return err
+			}
+		}
+
+		if ss.ptmx == nil {
+			ss.mu.Unlock()
+			return errors.New("terminal not started")
+		}
+
+		b := []byte(data)
+		for len(b) > 0 {
+			n, err := ss.ptmx.Write(b)
+			if err != nil {
+				ss.mu.Unlock()
+				return err
+			}
+			b = b[n:]
+		}
+		ss.mu.Unlock()
+		return nil
 	}
-	return nil
+}
+
+var waitForSessionReady = func(done <-chan struct{}) error {
+	if done == nil {
+		return errors.New("terminal start state unavailable")
+	}
+	timer := time.NewTimer(sessionReadyTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return errors.New("terminal start timed out")
+	}
 }
 
 // Resize changes the terminal dimensions for the specified session.
@@ -1026,6 +1111,7 @@ func (s *TerminalService) Stop(sessionId string) error {
 	ss.ptmx = nil
 	ss.proc = nil
 	ss.running = false
+	ss.signalStartDoneLocked()
 	ss.mu.Unlock()
 
 	s.releaseOldProcess(ss, oldPtmx, oldProc)
