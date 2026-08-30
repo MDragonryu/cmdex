@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"cmdex/globalhotkey"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -15,30 +16,65 @@ type recordingLauncherHotkeyManager struct {
 	mu              sync.Mutex
 	registers       int
 	unregisters     int
-	supported       bool
+	registered      bool
+	shortcut        string
+	callback        func()
 	registrationErr error
 }
 
-func (m *recordingLauncherHotkeyManager) Supported() bool { return m.supported }
-
-func (m *recordingLauncherHotkeyManager) Register(globalhotkey.Chord, func()) error {
+func (m *recordingLauncherHotkeyManager) Register(shortcut string, callback func()) error {
 	m.mu.Lock()
 	m.registers++
 	err := m.registrationErr
+	if err == nil {
+		m.registered = true
+		m.shortcut = shortcut
+		m.callback = callback
+	}
 	m.mu.Unlock()
 	return err
 }
 
-func (m *recordingLauncherHotkeyManager) Unregister() {
+func (m *recordingLauncherHotkeyManager) Unregister(_ string) error {
 	m.mu.Lock()
 	m.unregisters++
+	m.registered = false
 	m.mu.Unlock()
+	return nil
+}
+
+func (m *recordingLauncherHotkeyManager) IsRegistered(_ string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.registered
+}
+
+func (m *recordingLauncherHotkeyManager) Validate(shortcut string) error {
+	if !strings.Contains(shortcut, "+") {
+		return fmt.Errorf("shortcut %q needs at least one modifier", shortcut)
+	}
+	return nil
 }
 
 func (m *recordingLauncherHotkeyManager) registerCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.registers
+}
+
+func (m *recordingLauncherHotkeyManager) unregisterCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unregisters
+}
+
+func (m *recordingLauncherHotkeyManager) invoke() {
+	m.mu.Lock()
+	callback := m.callback
+	m.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
 }
 
 func launcherTestDB(t *testing.T) *DB {
@@ -111,7 +147,7 @@ func TestLauncherServiceApplySettingsTreatsNilAsDisabled(t *testing.T) {
 		t.Fatalf("seed nil launcher setting: %v", err)
 	}
 
-	manager := &recordingLauncherHotkeyManager{supported: true}
+	manager := &recordingLauncherHotkeyManager{}
 	service := &LauncherService{hotkeys: manager}
 	status := service.ApplySettings()
 	if status.Enabled {
@@ -132,7 +168,7 @@ func TestLauncherServiceApplySettingsExplicitEnableRegisters(t *testing.T) {
 		t.Fatalf("enable launcher: %v", err)
 	}
 
-	manager := &recordingLauncherHotkeyManager{supported: true}
+	manager := &recordingLauncherHotkeyManager{}
 	service := &LauncherService{hotkeys: manager}
 	status := service.ApplySettings()
 	if !status.Enabled {
@@ -146,9 +182,73 @@ func TestLauncherServiceApplySettingsExplicitEnableRegisters(t *testing.T) {
 	}
 }
 
+func TestLauncherServiceApplySettingsReregistersAndShutdownUnregisters(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := true
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("enable launcher: %v", err)
+	}
+
+	manager := &recordingLauncherHotkeyManager{}
+	service := &LauncherService{hotkeys: manager}
+	if status := service.ApplySettings(); !status.Registered {
+		t.Fatalf("initial ApplySettings status = %+v, want registered", status)
+	}
+	if status := service.ApplySettings(); !status.Registered {
+		t.Fatalf("second ApplySettings status = %+v, want registered", status)
+	}
+	if got := manager.registerCount(); got != 2 {
+		t.Fatalf("Register called %d times, want 2", got)
+	}
+	if got := manager.unregisterCount(); got != 1 {
+		t.Fatalf("Unregister called %d times before shutdown, want 1", got)
+	}
+
+	if err := service.ServiceShutdown(); err != nil {
+		t.Fatalf("ServiceShutdown failed: %v", err)
+	}
+	if got := manager.unregisterCount(); got != 2 {
+		t.Fatalf("Unregister called %d times after shutdown, want 2", got)
+	}
+}
+
+func TestLauncherServiceApplySettingsReportsUnsupportedManager(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := true
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("enable launcher: %v", err)
+	}
+
+	manager := &recordingLauncherHotkeyManager{
+		registrationErr: errors.New("global shortcuts are not supported on this platform"),
+	}
+	service := &LauncherService{hotkeys: manager}
+	status := service.ApplySettings()
+	if status.Supported {
+		t.Fatalf("unsupported manager status = %+v, want Supported=false", status)
+	}
+	if status.Registered {
+		t.Fatalf("unsupported manager status = %+v, want Registered=false", status)
+	}
+	if status.Error == "" {
+		t.Fatal("unsupported manager returned no status error")
+	}
+}
+
+func TestLauncherServiceValidateShortcutUsesManagerValidator(t *testing.T) {
+	manager := &recordingLauncherHotkeyManager{}
+	service := &LauncherService{hotkeys: manager}
+	if err := service.ValidateShortcut("Ctrl+Shift+K"); err != nil {
+		t.Fatalf("valid shortcut rejected: %v", err)
+	}
+	if err := service.ValidateShortcut("K"); err == nil {
+		t.Fatal("bare key accepted as a global shortcut")
+	}
+}
+
 func TestLauncherServiceStartupDisabledDoesNotRegister(t *testing.T) {
 	launcherTestDB(t)
-	manager := &recordingLauncherHotkeyManager{supported: true}
+	manager := &recordingLauncherHotkeyManager{}
 	useLauncherHotkeyManager(t, manager)
 
 	previousWailsApp := wailsApp

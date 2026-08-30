@@ -113,19 +113,18 @@ would be unusable in every other application.
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| macOS | Supported | **Requires Accessibility permission.** Grant CmDex access in System Settings › Privacy & Security › Accessibility, otherwise registration fails and Settings shows the reason. The launcher floats above full-screen apps and follows the active Space. |
-| Windows | Supported | Works in CGO-free builds. Appears above normal windows on the active virtual desktop. |
+| macOS | Supported | Uses Carbon `RegisterEventHotKey`, which does not require Accessibility permission. The launcher floats above full-screen apps and follows the active Space. |
+| Windows | Supported | Uses Win32 `RegisterHotKey` and does not require CGO. Appears above normal windows on the active virtual desktop. |
 | Linux (X11) | Supported | Uses `XGrabKey`. Some keys map to multiple modifier bits, so an exotic combination may not register. |
-| Linux (Wayland) | **Not supported** | The grab goes through XWayland, so it never fires while a native Wayland window has focus. Wayland exposes no portable global-shortcut protocol reachable from this Wails alpha. Settings shows a warning when a Wayland session is detected; run CmDex under X11 for a working shortcut. |
-| `CGO_ENABLED=0` Unix builds | Not supported | Registration returns an error and the app starts normally with the launcher disabled. |
+| Linux (Wayland) | Supported | Uses the desktop portal's `org.freedesktop.portal.GlobalShortcuts` interface. The compositor may assign or adjust the final binding; `LauncherStatus.registered` reflects the requested registration, not the compositor's final choice. |
 
 Additional known limitations:
 
 - **Multi-monitor:** the launcher always opens on the **primary** display. Wails
-  alpha.74 exposes no public cursor-position API, so the display the user is
+  beta.12 exposes no public cursor-position API, so the display the user is
   actually looking at cannot be determined portably.
-- **Shortcut conflicts on macOS:** hotkey registration may fail when another
-  application already uses the combination. `LauncherService.ApplySettings`
+- **Shortcut conflicts:** registration may fail when another application already
+  uses the combination. `LauncherService.ApplySettings`
   exposes that registration error in the launcher status so Settings can show
   the user why the shortcut is unavailable.
 

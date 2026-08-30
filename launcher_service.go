@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"cmdex/globalhotkey"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -29,10 +28,11 @@ const (
 	launcherHeight        = 460
 	launcherCenterDivisor = 2
 
-	launcherBackgroundRed   = 15
-	launcherBackgroundGreen = 15
-	launcherBackgroundBlue  = 20
-	launcherBackgroundAlpha = 255
+	launcherBackgroundRed           = 15
+	launcherBackgroundGreen         = 15
+	launcherBackgroundBlue          = 20
+	launcherBackgroundAlpha         = 255
+	launcherMinimumAcceleratorParts = 2
 	// launcherExpandedHeight is used once the inline terminal is revealed.
 	launcherExpandedHeight = 660
 
@@ -48,7 +48,8 @@ const (
 
 // LauncherStatus describes the state of the global shortcut for the settings UI.
 type LauncherStatus struct {
-	// Supported is false when this build cannot register global hotkeys at all.
+	// Supported is false when Wails cannot provide global shortcuts on this
+	// platform/build. Registration failures are surfaced separately in Error.
 	Supported bool `json:"supported"`
 	// Enabled mirrors the user's setting, regardless of registration success.
 	Enabled bool `json:"enabled"`
@@ -61,40 +62,88 @@ type LauncherStatus struct {
 	Platform      string `json:"platform"`
 }
 
-// launcherHotkeyManager is the small part of globalhotkey.Manager used by the
-// launcher. Keeping the service dependent on this interface also lets tests
-// verify that disabled startup never reaches the platform registration path.
+// launcherHotkeyManager is the small part of Wails' global shortcut manager
+// used by the launcher. Keeping the service dependent on this interface lets
+// tests verify registration behavior without starting a desktop application.
 type launcherHotkeyManager interface {
-	Supported() bool
-	Register(globalhotkey.Chord, func()) error
-	Unregister()
+	Register(string, func()) error
+	Unregister(string) error
+	IsRegistered(string) bool
+}
+
+type wailsLauncherHotkeyManager struct {
+	manager *application.GlobalShortcutManager
+}
+
+func (m wailsLauncherHotkeyManager) Register(accelerator string, callback func()) error {
+	return m.manager.Register(accelerator, callback)
+}
+
+func (m wailsLauncherHotkeyManager) Unregister(accelerator string) error {
+	return m.manager.Unregister(accelerator)
+}
+
+func (m wailsLauncherHotkeyManager) IsRegistered(accelerator string) bool {
+	return m.manager.IsRegistered(accelerator)
+}
+
+// Validate uses Wails' accelerator parser through MenuItem.SetAccelerator.
+// Wails beta.12 does not export the parser, so the temporary item provides the
+// same validation path without registering an OS shortcut.
+func (m wailsLauncherHotkeyManager) Validate(accelerator string) error {
+	item := application.NewMenuItem("launcher-shortcut-validation")
+	defer item.Destroy()
+	item.SetAccelerator(accelerator)
+	if item.GetAccelerator() == "" {
+		return fmt.Errorf("invalid accelerator %q", accelerator)
+	}
+
+	// Global shortcuts must include a modifier. Wails permits bare menu keys,
+	// but registering those globally would make the key unusable elsewhere.
+	parts := strings.Split(accelerator, "+")
+	if len(parts) < launcherMinimumAcceleratorParts {
+		return fmt.Errorf("shortcut %q needs at least one modifier", accelerator)
+	}
+	for _, part := range parts[:len(parts)-1] {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "cmdorctrl", "commandorcontrol", "cmd", "command", "ctrl",
+			"control", "optionoralt", "alt", "option", "opt", "shift",
+			"super", "meta", "win", "windows":
+		default:
+			return fmt.Errorf("shortcut %q needs at least one modifier", accelerator)
+		}
+	}
+	return nil
 }
 
 var newLauncherHotkeyManager = func() launcherHotkeyManager {
-	return globalhotkey.NewManager()
+	if wailsApp == nil || wailsApp.GlobalShortcut == nil {
+		return nil
+	}
+	return wailsLauncherHotkeyManager{manager: wailsApp.GlobalShortcut}
 }
 
 // LauncherService owns the global quick launcher: its always-on-top window, the
 // system-wide shortcut that toggles it, and the dedicated terminal session its
-// commands run in.
-//
-// The window and its terminal session are created once and then only shown and
-// hidden, so opening the launcher never rebuilds React state or respawns a
-// shell.
+// commands run in. The window and its terminal session are created once and
+// then only shown and hidden, so opening the launcher never rebuilds React
+// state or respawns a shell.
 type LauncherService struct {
 	mu sync.Mutex
 	// applyMu serializes the complete settings application transaction. In
 	// particular, the settings read must stay ordered with unregister,
 	// register, and the final status publication when startup and frontend
 	// settings changes overlap.
-	applyMu   sync.Mutex
-	loginMu   sync.Mutex
-	loginOp   uint64
-	window    *application.WebviewWindow
-	hotkeys   launcherHotkeyManager
-	sessionID string
-	shownAt   time.Time
-	status    LauncherStatus
+	applyMu            sync.Mutex
+	loginMu            sync.Mutex
+	loginOp            uint64
+	window             *application.WebviewWindow
+	hotkeys            launcherHotkeyManager
+	stopStart          func()
+	registeredShortcut string
+	sessionID          string
+	shownAt            time.Time
+	status             LauncherStatus
 }
 
 // ServiceStartup creates the launcher window up front (hidden) and applies the
@@ -111,22 +160,33 @@ func (s *LauncherService) ServiceStartup(ctx context.Context, options applicatio
 		s.mu.Unlock()
 	}
 
-	// Registration must not happen inline here. ServiceStartup runs on the main
-	// thread before application.Run starts the platform run loop, and the macOS
-	// hotkey backend blocks on the main queue — so doing this synchronously
-	// would deadlock before the app ever appears.
-	//
-	// A failure only means the shortcut is unavailable; it must never stop the
-	// app from starting. The reason is surfaced through GetStatus.
-	go s.ApplySettings()
+	// Register after Wails has started its platform loop. This makes OS-level
+	// failures available to ApplySettings instead of deferring them to Wails'
+	// generic error handler as happens for pre-Run registrations.
+	if wailsApp != nil && wailsApp.Event != nil {
+		s.stopStart = wailsApp.Event.OnApplicationEvent(
+			events.Common.ApplicationStarted,
+			func(*application.ApplicationEvent) { s.ApplySettings() },
+		)
+	} else {
+		// The nil-app path is used by unit tests which inject the manager seam.
+		go s.ApplySettings()
+	}
 	return nil
 }
 
 // ServiceShutdown releases the global shortcut.
 func (s *LauncherService) ServiceShutdown() error {
-	if s.hotkeys != nil {
-		s.hotkeys.Unregister()
+	if s.stopStart != nil {
+		s.stopStart()
+		s.stopStart = nil
 	}
+	s.applyMu.Lock()
+	if s.hotkeys != nil && s.registeredShortcut != "" {
+		_ = s.hotkeys.Unregister(s.registeredShortcut)
+		s.registeredShortcut = ""
+	}
+	s.applyMu.Unlock()
 	return nil
 }
 
@@ -257,7 +317,7 @@ func (s *LauncherService) Resize(expanded bool) {
 // positionWindow centres the launcher horizontally and places it in the upper
 // portion of the primary display's work area.
 //
-// Wails alpha.74 exposes no public cursor-position API, so "active display"
+// Wails beta.12 exposes no public cursor-position API, so "active display"
 // cannot be resolved reliably across platforms; the primary display is used
 // instead. See docs/CONFIGURATION.md for the limitation.
 func (s *LauncherService) positionWindow(w *application.WebviewWindow, height int) {
@@ -334,8 +394,13 @@ func (s *LauncherService) GetSessionID() (string, error) {
 // ValidateShortcut reports whether an accelerator string is a usable global
 // shortcut, so the settings UI can reject it before saving.
 func (s *LauncherService) ValidateShortcut(accelerator string) error {
-	_, err := globalhotkey.ParseChord(accelerator)
-	return err
+	if validator, ok := s.hotkeys.(interface{ Validate(string) error }); ok {
+		return validator.Validate(accelerator)
+	}
+	if wailsApp != nil && wailsApp.GlobalShortcut != nil {
+		return (wailsLauncherHotkeyManager{manager: wailsApp.GlobalShortcut}).Validate(accelerator)
+	}
+	return errors.New("global shortcut manager is not initialized")
 }
 
 // GetStatus returns the current launcher/shortcut state.
@@ -355,10 +420,9 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	defer s.applyMu.Unlock()
 
 	status := LauncherStatus{
-		Supported: s.hotkeys != nil && s.hotkeys.Supported(),
+		Supported: s.hotkeys != nil,
 		Platform:  runtime.GOOS,
 		Shortcut:  DefaultLauncherShortcut,
-		Warning:   globalhotkey.EnvironmentWarning(),
 	}
 
 	settings, err := db.GetSettings()
@@ -369,42 +433,51 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	}
 
 	// The launcher is opt-in. A nil value can occur in legacy/hand-edited
-	// settings and must remain disabled rather than unexpectedly requesting
-	// macOS Accessibility permission during startup.
+	// settings and must remain disabled rather than unexpectedly registering a
+	// global shortcut during startup.
 	status.Enabled = settings.LauncherEnabled != nil && *settings.LauncherEnabled
 	status.LaunchAtLogin = autostartEnabled()
 	if settings.LauncherShortcut != "" {
 		status.Shortcut = settings.LauncherShortcut
 	}
 
-	if s.hotkeys != nil {
-		s.hotkeys.Unregister()
+	if s.hotkeys != nil && s.registeredShortcut != "" {
+		_ = s.hotkeys.Unregister(s.registeredShortcut)
+		s.registeredShortcut = ""
 	}
 
 	if !status.Enabled {
 		s.setStatus(status)
 		return status
 	}
-	if !status.Supported {
-		status.Error = "This build cannot register global shortcuts. Rebuild with CGO enabled."
+	if s.hotkeys == nil {
+		status.Supported = false
+		status.Error = "Global shortcuts are unavailable on this platform."
 		s.setStatus(status)
 		return status
 	}
 
-	chord, err := globalhotkey.ParseChord(status.Shortcut)
-	if err != nil {
-		status.Error = err.Error()
-		s.setStatus(status)
-		return status
+	if validator, ok := s.hotkeys.(interface{ Validate(string) error }); ok {
+		if err := validator.Validate(status.Shortcut); err != nil {
+			status.Error = err.Error()
+			s.setStatus(status)
+			return status
+		}
 	}
 
-	if err := s.hotkeys.Register(chord, s.Toggle); err != nil {
+	if err := s.hotkeys.Register(status.Shortcut, s.Toggle); err != nil {
 		status.Error = registrationHint(err)
+		if strings.Contains(strings.ToLower(err.Error()), "not supported") {
+			status.Supported = false
+		}
 		s.setStatus(status)
 		return status
 	}
 
-	status.Registered = true
+	status.Registered = s.hotkeys.IsRegistered(status.Shortcut)
+	if status.Registered {
+		s.registeredShortcut = status.Shortcut
+	}
 	s.setStatus(status)
 	return status
 }
@@ -449,13 +522,8 @@ func (s *LauncherService) setStatus(status LauncherStatus) {
 	s.mu.Unlock()
 }
 
-// registrationHint turns a raw registration failure into something actionable,
-// since the most common macOS cause is a missing permission rather than a
-// genuine conflict.
+// registrationHint turns a raw Wails registration failure into text suitable
+// for the launcher settings status line.
 func registrationHint(err error) string {
-	if runtime.GOOS == "darwin" {
-		return fmt.Sprintf("%v — if this persists, grant CmDex Accessibility access in "+
-			"System Settings › Privacy & Security › Accessibility, then re-enable the launcher.", err)
-	}
 	return err.Error()
 }

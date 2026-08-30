@@ -5,11 +5,9 @@
 /**
  * LauncherService owns the global quick launcher: its always-on-top window, the
  * system-wide shortcut that toggles it, and the dedicated terminal session its
- * commands run in.
- *
- * The window and its terminal session are created once and then only shown and
- * hidden, so opening the launcher never rebuilds React state or respawns a
- * shell.
+ * commands run in. The window and its terminal session are created once and
+ * then only shown and hidden, so opening the launcher never rebuilds React
+ * state or respawns a shell.
  * @module
  */
 

@@ -541,7 +541,8 @@ export class LauncherStatus {
     constructor($$source = {}) {
         if (!("supported" in $$source)) {
             /**
-             * Supported is false when this build cannot register global hotkeys at all.
+             * Supported is false when Wails cannot provide global shortcuts on this
+             * platform/build. Registration failures are surfaced separately in Error.
              * @member
              * @type {boolean}
              */

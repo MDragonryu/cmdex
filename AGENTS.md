@@ -177,7 +177,9 @@ Removed along the way — do not reintroduce references to them: `RunInTerminal`
 - Themes use CSS variables in `frontend/src/style.css` — modify variables, not hardcoded colors.
 - Terminal event names are per session (`pty-output:<id>`), so subscribe only once you have the session ID and clean up on close.
 - `AppSettings.ShellIntegration` changes apply to **newly started sessions only**, never to running ones.
-- Global hotkeys must be registered off the main thread; the macOS backend dispatches onto the main queue and can deadlock during service startup.
+- Global shortcuts use Wails v3's `App.GlobalShortcut` manager. Registration is
+  applied after `ApplicationStarted`; Wails marshals platform operations and
+  invokes callbacks on their own goroutines.
 - The launcher's terminal is created via `CreateInternalSession`; internal sessions stay out of the main window's terminal tabs and active-session target.
 
 ## Tests
