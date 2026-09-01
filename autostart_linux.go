@@ -13,7 +13,9 @@ const autostartFileMode = 0o600
 
 func autostartDesktopPath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
+	// XDG_CONFIG_HOME is required to be an absolute path. Ignoring a relative
+	// value prevents the autostart entry from depending on the app's cwd.
+	if dir == "" || !filepath.IsAbs(dir) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)

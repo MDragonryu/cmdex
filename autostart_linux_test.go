@@ -111,3 +111,20 @@ func TestSetAutostartDoesNotFollowExistingSymlink(t *testing.T) {
 		t.Fatal("autostart destination remains a symlink")
 	}
 }
+
+func TestAutostartDesktopPathIgnoresRelativeXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "relative-config")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home directory: %v", err)
+	}
+	want := filepath.Join(home, ".config", "autostart", "cmdex.desktop")
+	got, err := autostartDesktopPath()
+	if err != nil {
+		t.Fatalf("autostartDesktopPath failed: %v", err)
+	}
+	if got != want {
+		t.Fatalf("autostartDesktopPath = %q, want %q", got, want)
+	}
+}

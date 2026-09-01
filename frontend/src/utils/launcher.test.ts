@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyRefreshedPresets, transitionLauncherQuery } from './launcher';
+import {
+  applyRefreshedPresets,
+  createLauncherResizeQueue,
+  isCurrentLauncherRequest,
+  transitionLauncherQuery,
+} from './launcher';
 import { type Command } from '../types';
 
 function command(id: string): Command {
@@ -61,5 +66,41 @@ describe('applyRefreshedPresets', () => {
       ...commandA,
       presets: presetA,
     });
+  });
+});
+
+describe('launcher async request guards', () => {
+  it('rejects a launcher data response once a newer request starts', () => {
+    expect(isCurrentLauncherRequest(1, 2)).toBe(false);
+    expect(isCurrentLauncherRequest(2, 2)).toBe(true);
+  });
+
+  it('applies resize requests in order so a reset wins over an older resize', async () => {
+    const calls: boolean[] = [];
+    let releaseResize!: () => void;
+    const queue = createLauncherResizeQueue(async (expanded) => {
+      calls.push(expanded);
+      if (expanded) await new Promise<void>(resolve => { releaseResize = resolve; });
+    });
+
+    const expand = queue.enqueue(true);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    const reset = queue.enqueue(false);
+    expect(calls).toEqual([true]);
+
+    releaseResize();
+    await expand;
+    await reset;
+    expect(calls).toEqual([true, false]);
+  });
+
+  it('coalesces resize requests that have not started yet', async () => {
+    const calls: boolean[] = [];
+    const queue = createLauncherResizeQueue(async (expanded) => {
+      calls.push(expanded);
+    });
+
+    await Promise.all([queue.enqueue(true), queue.enqueue(false), queue.enqueue(true)]);
+    expect(calls).toEqual([true]);
   });
 });

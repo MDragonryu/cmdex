@@ -26,12 +26,20 @@ describe('createLatestAsyncQueue', () => {
     expect(events).toEqual(['first-start', 'first-end', 'second-start']);
   });
 
-  it('continues after a failed operation', async () => {
+  it('marks a stale failed operation as non-current and continues', async () => {
     const queue = createLatestAsyncQueue();
     const first = queue.enqueue(async () => { throw new Error('failed'); });
     const second = queue.enqueue(async () => 'ok');
 
-    await expect(first).rejects.toThrow('failed');
+    const firstResult = await first;
+    expect(firstResult.current).toBe(false);
+    expect(firstResult.error).toBeInstanceOf(Error);
+    expect((firstResult.error as Error).message).toBe('failed');
     await expect(second).resolves.toEqual({ value: 'ok', current: true });
+  });
+
+  it('still rejects a failed operation when it remains current', async () => {
+    const queue = createLatestAsyncQueue();
+    await expect(queue.enqueue(async () => { throw new Error('failed'); })).rejects.toThrow('failed');
   });
 });

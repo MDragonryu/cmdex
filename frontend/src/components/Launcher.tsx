@@ -16,7 +16,13 @@ import {
 } from '../types';
 import { getCommandDisplayTitle } from '../utils/tab';
 import { filterCommands, scriptSnippet } from '../utils/commandSearch';
-import { applyRefreshedPresets, transitionLauncherQuery, type LauncherStage } from '../utils/launcher';
+import {
+  applyRefreshedPresets,
+  createLauncherResizeQueue,
+  isCurrentLauncherRequest,
+  transitionLauncherQuery,
+  type LauncherStage,
+} from '../utils/launcher';
 import { eventNames, initEventNames } from '../wails/events';
 import { Kbd } from './ui/kbd';
 import TerminalComponent, { type TerminalHandle } from './Terminal';
@@ -57,6 +63,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   const [ranCommand, setRanCommand] = useState<Command | null>(null);
   const [eventsInitialized, setEventsInitialized] = useState(false);
   const activationRef = useRef(0);
+  const loadRequestRef = useRef(0);
+  const [resizeQueue] = useState(() => createLauncherResizeQueue(async (expanded) => {
+    await Resize(expanded);
+  }));
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -71,14 +81,20 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   const filtered = useMemo(() => filterCommands(query, commands), [query, commands]);
 
   const loadData = useCallback(async () => {
+    const request = ++loadRequestRef.current;
     try {
       const [cmds, cats] = await Promise.all([GetCommands(), GetCategories()]);
+      if (!isCurrentLauncherRequest(request, loadRequestRef.current)) return;
       setCommands(cmds || []);
       setCategories(cats || []);
     } catch (err) {
       console.error('launcher: failed to load commands', err);
     }
   }, []);
+
+  const resizeLauncher = useCallback((expanded: boolean) => {
+    return resizeQueue.enqueue(expanded);
+  }, [resizeQueue]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set from the promise callback
@@ -123,10 +139,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     setPendingCommand(null);
     setVariables([]);
     setRanCommand(null);
-    Resize(false).catch(() => {});
+    resizeLauncher(false).catch(() => {});
     loadData();
     focusSearch();
-  }, [focusSearch, loadData]);
+  }, [focusSearch, loadData, resizeLauncher]);
 
   // Every time the window is revealed: refresh the command list (it may have
   // changed in the main window), focus the field and select any existing text
@@ -159,9 +175,9 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     setPendingCommand(null);
     setVariables([]);
     setRanCommand(null);
-    Resize(false).catch(() => {});
+    resizeLauncher(false).catch(() => {});
     focusSearch();
-  }, [focusSearch]);
+  }, [focusSearch, resizeLauncher]);
 
   const execute = useCallback(async (
     cmd: Command,
@@ -178,7 +194,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
 
       setStage('running');
       setRanCommand(cmd);
-      await Resize(true).catch(() => {});
+      await resizeLauncher(true).catch(() => {});
       if (activation !== activationRef.current) return;
 
       const record = await RunCommandInSession(cmd.id, values, id);
@@ -190,7 +206,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
         if (activation === activationRef.current) {
           setStage('search');
           setRanCommand(null);
-          Resize(false).catch(() => {});
+          resizeLauncher(false).catch(() => {});
           focusSearch();
         }
         return;
@@ -206,10 +222,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       console.error('launcher: execute failed', err);
       setStage('search');
       setRanCommand(null);
-      Resize(false).catch(() => {});
+      resizeLauncher(false).catch(() => {});
       focusSearch();
     }
-  }, [sessionId, focusSearch]);
+  }, [sessionId, focusSearch, resizeLauncher]);
 
   /** Activate the selected result: prompt for variables, or run straight away. */
   const activate = useCallback(async (cmd: Command) => {
@@ -223,7 +239,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
         setPendingCommand(cmd);
         setVariables(prompts);
         setStage('variables');
-        Resize(true).catch(() => {});
+        resizeLauncher(true).catch(() => {});
         return;
       }
       if (activation !== activationRef.current) return;
@@ -233,7 +249,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       toast.error('Failed to prepare command: ' + String(err));
       console.error('launcher: activate failed', err);
     }
-  }, [execute]);
+  }, [execute, resizeLauncher]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -266,10 +282,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
       setPendingCommand(null);
       setVariables([]);
       setRanCommand(null);
-      Resize(false).catch(() => {});
+      resizeLauncher(false).catch(() => {});
     }
     setQuery(transition.query);
-  }, [stage]);
+  }, [stage, resizeLauncher]);
 
   // Escape anywhere in the window, including while the terminal has focus.
   //

@@ -1,6 +1,7 @@
 export interface AsyncQueueResult<T> {
-  value: T;
+  value?: T;
   current: boolean;
+  error?: unknown;
 }
 
 /**
@@ -26,7 +27,18 @@ export function createLatestAsyncQueue() {
       const request = ++generation;
       const result = tail.then(operation, operation);
       tail = result.then(() => undefined, () => undefined);
-      return result.then(value => ({ value, current: request === generation }));
+      return result.then(
+        value => ({ value, current: request === generation }),
+        error => {
+          // A request that was superseded while running must not turn into a
+          // user-visible failure. Return the same result shape as successful
+          // stale work so callers can consistently check `current`.
+          if (request !== generation) {
+            return { current: false, error };
+          }
+          throw error;
+        },
+      );
     },
   };
 }

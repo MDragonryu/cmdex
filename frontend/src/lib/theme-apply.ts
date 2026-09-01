@@ -1,6 +1,6 @@
 import type { CustomTheme } from '../types';
 
-const CUSTOM_THEME_VAR_KEYS = [
+export const CUSTOM_THEME_VAR_KEYS = [
   'background', 'foreground', 'card', 'card-foreground', 'popover', 'popover-foreground',
   'primary', 'primary-foreground', 'secondary', 'secondary-foreground', 'muted', 'muted-foreground',
   'accent', 'accent-foreground', 'destructive', 'destructive-foreground', 'success', 'success-foreground',
@@ -42,7 +42,9 @@ function isCustomTheme(value: unknown): value is CustomTheme {
   ) {
     return false;
   }
-  return Object.values(theme.colors as Record<string, unknown>).every((c) => typeof c === 'string');
+  const colors = theme.colors as Record<string, unknown>;
+  return CUSTOM_THEME_VAR_KEYS.every((key) => typeof colors[key] === 'string')
+    && Object.values(colors).every((c) => typeof c === 'string');
 }
 
 /**
