@@ -16,7 +16,7 @@ import {
 } from '../types';
 import { getCommandDisplayTitle } from '../utils/tab';
 import { filterCommands, scriptSnippet } from '../utils/commandSearch';
-import { transitionLauncherQuery, type LauncherStage } from '../utils/launcher';
+import { applyRefreshedPresets, transitionLauncherQuery, type LauncherStage } from '../utils/launcher';
 import { eventNames, initEventNames } from '../wails/events';
 import { Kbd } from './ui/kbd';
 import TerminalComponent, { type TerminalHandle } from './Terminal';
@@ -298,7 +298,7 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   /** Re-read the presets for a command after one was added, renamed or removed. */
   const refreshPresets = useCallback(async (cmd: Command) => {
     const presets = await GetPresets(cmd.id);
-    setPendingCommand({ ...cmd, presets: presets || [] });
+    setPendingCommand((current) => applyRefreshedPresets(current, cmd, presets || []));
   }, []);
 
   // Screen readers follow the highlighted row through aria-activedescendant:

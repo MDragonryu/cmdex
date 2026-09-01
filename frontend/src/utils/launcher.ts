@@ -1,3 +1,5 @@
+import { type Command, type VariablePreset } from '../types';
+
 export type LauncherStage = 'search' | 'variables' | 'running';
 
 export interface LauncherQueryTransition {
@@ -16,4 +18,19 @@ export function transitionLauncherQuery(stage: LauncherStage, query: string): La
     return { query, stage, clearRunState: false };
   }
   return { query, stage: 'search', clearRunState: true };
+}
+
+/**
+ * Apply an asynchronous preset refresh only while its command is still open.
+ * A canceled prompt has no current command, and a replacement prompt has a
+ * different ID; both must ignore the stale response.
+ */
+export function applyRefreshedPresets(
+  current: Command | null,
+  refreshedCommand: Command,
+  presets: VariablePreset[],
+): Command | null {
+  return current?.id === refreshedCommand.id
+    ? { ...current, presets }
+    : current;
 }
