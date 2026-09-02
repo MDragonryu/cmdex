@@ -289,7 +289,10 @@ func (s *LauncherService) ServiceShutdown() error {
 	// work is joined, this final transaction cannot be undone by startup code.
 	s.applyMu.Lock()
 	if s.hotkeys != nil && s.registeredShortcut != "" {
-		_ = s.hotkeys.Unregister(s.registeredShortcut)
+		previousShortcut := s.registeredShortcut
+		if err := s.hotkeys.Unregister(previousShortcut); err != nil {
+			fmt.Printf("unregister launcher shortcut %q: %v\n", previousShortcut, err)
+		}
 		s.registeredShortcut = ""
 	}
 	s.applyMu.Unlock()
@@ -623,6 +626,9 @@ func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 		if info == nil {
 			return "", errors.New("create launcher terminal session: empty session response")
 		}
+		if strings.TrimSpace(info.ID) == "" {
+			return "", errors.New("create launcher terminal session: empty session ID")
+		}
 		if sessionShutdown != nil {
 			select {
 			case <-sessionShutdown:
@@ -638,12 +644,15 @@ func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 func (s *LauncherService) completeSessionCreate(done chan struct{}, info *SessionInfo, err error) {
 	s.sessionMu.Lock()
 	s.sessionCreating = false
-	if err == nil && info != nil && !s.sessionShuttingDown {
+	validInfo := info != nil && strings.TrimSpace(info.ID) != ""
+	if err == nil && validInfo && !s.sessionShuttingDown {
 		s.sessionID = info.ID
 	} else if err != nil {
 		s.sessionErr = fmt.Sprintf("launcher terminal unavailable: %v", err)
 	} else if info == nil {
 		s.sessionErr = "launcher terminal unavailable: empty session response"
+	} else if !validInfo {
+		s.sessionErr = "launcher terminal unavailable: empty session ID"
 	}
 	shuttingDown := s.sessionShuttingDown
 	close(done)
@@ -653,10 +662,12 @@ func (s *LauncherService) completeSessionCreate(done chan struct{}, info *Sessio
 		s.publishSessionError(fmt.Sprintf("launcher terminal unavailable: %v", err))
 	} else if info == nil {
 		s.publishSessionError("launcher terminal unavailable: empty session response")
+	} else if !validInfo {
+		s.publishSessionError("launcher terminal unavailable: empty session ID")
 	} else if !shuttingDown {
 		s.publishSessionError("")
 	}
-	if shuttingDown && err == nil && info != nil {
+	if shuttingDown && err == nil && validInfo {
 		s.closeLauncherSession(info.ID)
 	}
 }
@@ -772,7 +783,16 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	}
 
 	if s.hotkeys != nil && s.registeredShortcut != "" {
-		_ = s.hotkeys.Unregister(s.registeredShortcut)
+		previousShortcut := s.registeredShortcut
+		if err := s.hotkeys.Unregister(previousShortcut); err != nil {
+			// Do not proceed with registration while the previous shortcut may
+			// still be installed. Keep the ownership marker so a later settings
+			// application can retry the cleanup, and expose the failure to the UI.
+			status.Error = fmt.Sprintf("unregister shortcut %q: %v", previousShortcut, err)
+			status.Registered = s.hotkeys.IsRegistered(previousShortcut)
+			status = s.setStatusFromApply(status, sessionErr)
+			return status
+		}
 		s.registeredShortcut = ""
 	}
 

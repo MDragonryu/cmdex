@@ -23,6 +23,7 @@ type recordingLauncherHotkeyManager struct {
 	shortcut        string
 	callback        func()
 	registrationErr error
+	unregisterErr   error
 	registerStarted chan struct{}
 	registerRelease chan struct{}
 	registerOnce    sync.Once
@@ -48,9 +49,12 @@ func (m *recordingLauncherHotkeyManager) Register(shortcut string, callback func
 func (m *recordingLauncherHotkeyManager) Unregister(_ string) error {
 	m.mu.Lock()
 	m.unregisters++
-	m.registered = false
+	err := m.unregisterErr
+	if err == nil {
+		m.registered = false
+	}
 	m.mu.Unlock()
-	return nil
+	return err
 }
 
 func (m *recordingLauncherHotkeyManager) IsRegistered(_ string) bool {
@@ -222,6 +226,38 @@ func TestLauncherServiceApplySettingsExplicitEnableRegisters(t *testing.T) {
 	}
 	if got := manager.registerCount(); got != 1 {
 		t.Fatalf("Register called %d times for explicit true LauncherEnabled, want 1", got)
+	}
+}
+
+func TestLauncherServiceApplySettingsReportsUnregisterFailure(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := true
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("enable launcher: %v", err)
+	}
+
+	manager := &recordingLauncherHotkeyManager{
+		registered:    true,
+		shortcut:      "Ctrl+Shift+K",
+		unregisterErr: errors.New("hotkey manager unavailable"),
+	}
+	service := &LauncherService{
+		hotkeys:            manager,
+		registeredShortcut: "Ctrl+Shift+K",
+	}
+
+	status := service.ApplySettings()
+	if !strings.Contains(status.Error, "unregister shortcut") {
+		t.Fatalf("ApplySettings error = %q, want unregister failure", status.Error)
+	}
+	if !status.Registered {
+		t.Fatalf("ApplySettings status = %+v, want the still-registered shortcut reported", status)
+	}
+	if got := manager.registerCount(); got != 0 {
+		t.Fatalf("Register called %d times after unregister failure, want 0", got)
+	}
+	if service.registeredShortcut != "Ctrl+Shift+K" {
+		t.Fatalf("registeredShortcut = %q, want retained ownership marker", service.registeredShortcut)
 	}
 }
 
@@ -732,6 +768,27 @@ func TestLauncherSessionEagerCreationReusesOneSession(t *testing.T) {
 	}
 	if creates != 1 {
 		t.Fatalf("createSession called %d times, want 1", creates)
+	}
+}
+
+func TestLauncherSessionRejectsEmptyID(t *testing.T) {
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			return &SessionInfo{Name: "Launcher", Running: true}, nil
+		},
+		sessionShutdown: make(chan struct{}),
+	}
+
+	if id, err := service.GetSessionID(); err == nil || id != "" || !strings.Contains(err.Error(), "empty session ID") {
+		t.Fatalf("GetSessionID = %q, %v, want empty-session-ID error", id, err)
+	}
+	if status := service.GetStatus(); !strings.Contains(status.Error, "empty session ID") {
+		t.Fatalf("status = %+v, want empty-session-ID error", status)
+	}
+	service.sessionMu.Lock()
+	defer service.sessionMu.Unlock()
+	if service.sessionID != "" {
+		t.Fatalf("sessionID = %q, want no session recorded", service.sessionID)
 	}
 }
 
