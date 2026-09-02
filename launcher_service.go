@@ -739,6 +739,11 @@ func (s *LauncherService) GetStatus() LauncherStatus {
 func (s *LauncherService) ApplySettings() LauncherStatus {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
+	// Keep launch-at-login status reads and publication ordered with
+	// SetLaunchAtLogin. Otherwise an ApplySettings call that started earlier
+	// can publish an old OS value after a concurrent toggle has completed.
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
 
 	status := LauncherStatus{
 		Supported: s.hotkeys != nil,
@@ -761,7 +766,7 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	// settings and must remain disabled rather than unexpectedly registering a
 	// global shortcut during startup.
 	status.Enabled = settings.LauncherEnabled != nil && *settings.LauncherEnabled
-	status.LaunchAtLogin = autostartEnabled()
+	status.LaunchAtLogin = s.autostartEnabled()
 	if settings.LauncherShortcut != "" {
 		status.Shortcut = settings.LauncherShortcut
 	}

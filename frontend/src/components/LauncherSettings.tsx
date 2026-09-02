@@ -62,14 +62,39 @@ const LauncherSettings: React.FC = () => {
   const [pendingShortcut, setPendingShortcut] = useState('');
   const captureRef = useRef<HTMLInputElement>(null);
   const [settingsQueue] = useState(createLatestAsyncQueue);
+  const latestSettingsOperationRef = useRef(0);
 
   // Wails calls are asynchronous and settings updates are partial merges. A
   // small FIFO makes rapid toggles/shortcut captures last-write-wins, while
   // the generation check prevents an older ApplySettings response from
   // repainting the current status.
-  const enqueueSettings = useCallback(<T,>(operation: () => Promise<T>): Promise<QueuedSettingsResult<T>> => {
-    return settingsQueue.enqueue(operation);
+  const enqueueSettings = useCallback(<T,>(
+    operation: () => Promise<T>,
+    onCurrentFailure?: (operation: number) => Promise<void>,
+  ): Promise<QueuedSettingsResult<T>> => {
+    const operationNumber = ++latestSettingsOperationRef.current;
+    return settingsQueue.enqueue(operation).catch(async (error) => {
+      // A current failure is not followed by a successful result that can
+      // repaint status. Refresh the backend state so an older success that
+      // was correctly suppressed cannot leave the controls stale. The second
+      // generation check belongs after the fetch as a newer operation may
+      // have started while GetStatus was in flight.
+      if (operationNumber === latestSettingsOperationRef.current && onCurrentFailure) {
+        await onCurrentFailure(operationNumber);
+      }
+      throw error;
+    });
   }, [settingsQueue]);
+
+  const refreshStatusAfterFailure = useCallback(async (operationNumber: number) => {
+    if (operationNumber !== latestSettingsOperationRef.current) return;
+    try {
+      const next = await GetStatus() as LauncherStatus;
+      if (operationNumber === latestSettingsOperationRef.current) setStatus(next);
+    } catch (err) {
+      console.error('launcher settings: recovery GetStatus failed', err);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const generation = settingsQueue.invalidate();
@@ -97,10 +122,10 @@ const LauncherSettings: React.FC = () => {
     if (validate) await validate();
     await SetSettings(JSON.stringify(patch));
     return await ApplySettings() as LauncherStatus;
-  }).then(result => {
+  }, refreshStatusAfterFailure).then(result => {
     if (result.current) setStatus(result.value);
     return result;
-  }), [enqueueSettings]);
+  }), [enqueueSettings, refreshStatusAfterFailure]);
 
   const toggleEnabled = useCallback(async (enabled: boolean) => {
     try {
@@ -140,12 +165,12 @@ const LauncherSettings: React.FC = () => {
       const result = await enqueueSettings(async () => {
         await SetLaunchAtLogin(enabled);
         return await GetStatus() as LauncherStatus;
-      });
+      }, refreshStatusAfterFailure);
       if (result.current) setStatus(result.value);
     } catch (err) {
       toast.error(t('settings.launchAtLoginFailed', { message: String(err) }));
     }
-  }, [enqueueSettings, t]);
+  }, [enqueueSettings, refreshStatusAfterFailure, t]);
 
   const handleCaptureKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     e.preventDefault();

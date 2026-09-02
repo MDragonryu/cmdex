@@ -225,6 +225,90 @@ func TestLauncherServiceApplySettingsExplicitEnableRegisters(t *testing.T) {
 	}
 }
 
+func TestLauncherServiceApplySettingsUsesAutostartProvider(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := false
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("disable launcher: %v", err)
+	}
+
+	service := &LauncherService{
+		hotkeys:            &recordingLauncherHotkeyManager{},
+		autostartEnabledFn: func() bool { return true },
+	}
+	status := service.ApplySettings()
+	if !status.LaunchAtLogin {
+		t.Fatalf("ApplySettings LaunchAtLogin = false, want provider value true")
+	}
+}
+
+func TestLauncherServiceApplySettingsDoesNotOverwriteConcurrentLoginToggle(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := false
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("disable launcher: %v", err)
+	}
+
+	providerStarted := make(chan struct{})
+	releaseProvider := make(chan struct{})
+	var providerOnce sync.Once
+	osEnabled := false
+	var stateMu sync.Mutex
+	service := &LauncherService{
+		hotkeys: &recordingLauncherHotkeyManager{},
+		autostartEnabledFn: func() bool {
+			providerOnce.Do(func() { close(providerStarted) })
+			<-releaseProvider
+			stateMu.Lock()
+			defer stateMu.Unlock()
+			return osEnabled
+		},
+		setAutostartFn: func(value bool) error {
+			stateMu.Lock()
+			osEnabled = value
+			stateMu.Unlock()
+			return nil
+		},
+		persistLoginFn: func(bool) error { return nil },
+	}
+
+	applyResult := make(chan LauncherStatus, 1)
+	go func() { applyResult <- service.ApplySettings() }()
+	select {
+	case <-providerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("ApplySettings did not read the autostart provider")
+	}
+
+	toggleResult := make(chan error, 1)
+	go func() { toggleResult <- service.SetLaunchAtLogin(true) }()
+	deadline := time.Now().Add(time.Second)
+	for atomic.LoadUint64(&service.loginOp) == 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if atomic.LoadUint64(&service.loginOp) != 1 {
+		t.Fatal("concurrent launch-at-login toggle did not start")
+	}
+	close(releaseProvider)
+
+	select {
+	case <-applyResult:
+	case <-time.After(time.Second):
+		t.Fatal("ApplySettings did not complete")
+	}
+	select {
+	case err := <-toggleResult:
+		if err != nil {
+			t.Fatalf("SetLaunchAtLogin failed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetLaunchAtLogin did not complete")
+	}
+	if status := service.GetStatus(); !status.LaunchAtLogin {
+		t.Fatalf("final LaunchAtLogin = false, want concurrent toggle to win: %+v", status)
+	}
+}
+
 func TestLauncherServiceApplySettingsReregistersAndShutdownUnregisters(t *testing.T) {
 	testDB := launcherTestDB(t)
 	enabled := true
