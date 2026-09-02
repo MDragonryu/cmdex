@@ -443,7 +443,7 @@ function App() {
     // colors directly) still looks correct.
     useEffect(() => {
         const custom = customThemes.find((c) => c.id === theme);
-        applyTheme(theme, custom?.colors ?? null);
+        applyTheme(theme, custom?.colors);
         settingsRef.current.theme = theme;
         settingsRef.current.customThemes = customThemes;
         flushSettings();

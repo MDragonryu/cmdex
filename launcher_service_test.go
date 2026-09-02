@@ -415,6 +415,54 @@ func TestLauncherServiceApplySettingsWaitsForPreviousApplication(t *testing.T) {
 	}
 }
 
+func TestLauncherServiceApplyStatusKeepsNewerSessionError(t *testing.T) {
+	service := &LauncherService{sessionErr: "launcher terminal unavailable: newer failure"}
+	status := service.setStatusFromApply(
+		LauncherStatus{Error: "launcher terminal unavailable: old failure"},
+		"launcher terminal unavailable: old failure",
+	)
+	if status.Error != service.sessionErr {
+		t.Fatalf("ApplySettings status error = %q, want newer session error %q", status.Error, service.sessionErr)
+	}
+	if got := service.GetStatus().Error; got != service.sessionErr {
+		t.Fatalf("stored status error = %q, want newer session error %q", got, service.sessionErr)
+	}
+}
+
+func TestLauncherServiceApplyStatusPreservesIndependentErrorWhenSessionRecovers(t *testing.T) {
+	service := &LauncherService{}
+	status := service.setStatusFromApply(
+		LauncherStatus{Error: "shortcut registration failed"},
+		"launcher terminal unavailable: old failure",
+	)
+	if status.Error != "shortcut registration failed" {
+		t.Fatalf("ApplySettings status error = %q, want independent registration error", status.Error)
+	}
+}
+
+func TestLauncherServiceToggleTargetIsAtomic(t *testing.T) {
+	service := &LauncherService{}
+	const toggles = 32
+	var wg sync.WaitGroup
+	for i := 0; i < toggles; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			service.nextVisibilityTarget()
+		}()
+	}
+	wg.Wait()
+
+	service.visibilityMu.Lock()
+	defer service.visibilityMu.Unlock()
+	if service.visibilityTarget {
+		t.Fatal("final visibility target is visible after an even number of toggles")
+	}
+	if service.visibilityOp != toggles {
+		t.Fatalf("visibility operation count = %d, want %d", service.visibilityOp, toggles)
+	}
+}
+
 func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

@@ -122,7 +122,12 @@ func (s *ExecutionService) resolveScript(cmd Command, variables map[string]strin
 	maps.Copy(resolved, eval.EvalDefaults(cmd.Variables))
 	maps.Copy(resolved, variables)
 	for _, definition := range cmd.Variables {
-		if strings.TrimSpace(resolved[definition.Name]) == "" {
+		// An explicitly configured default makes the variable optional even
+		// when evaluating that default produces an empty string (for example,
+		// env("UNSET_NAME")). An empty default field is the legacy marker for
+		// a required variable, which preserves validation for definitions that
+		// have no fallback at all.
+		if strings.TrimSpace(definition.Default) == "" && strings.TrimSpace(resolved[definition.Name]) == "" {
 			return "", fmt.Errorf("missing required variable: %s", definition.Name)
 		}
 	}

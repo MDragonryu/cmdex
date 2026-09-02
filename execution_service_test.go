@@ -175,6 +175,35 @@ func TestRunCommandInSession_ResolvesDefaultsAndRequiresValues(t *testing.T) {
 	}
 }
 
+func TestResolveScript_AllowsExplicitDefaultThatEvaluatesEmpty(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo {{optional}}",
+		Variables: []VariableDefinition{{
+			Name:    "optional",
+			Default: `env("CMDEX_TEST_UNSET_DEFAULT_7D2C")`,
+		}},
+	}
+
+	resolved, err := (&ExecutionService{}).resolveScript(cmd, nil)
+	if err != nil {
+		t.Fatalf("resolveScript returned error for empty evaluated default: %v", err)
+	}
+	if resolved != "echo" {
+		t.Fatalf("resolved script = %q, want empty default substituted", resolved)
+	}
+}
+
+func TestResolveScript_RequiresDefinitionWithoutDefault(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo {{required}}",
+		Variables:     []VariableDefinition{{Name: "required"}},
+	}
+
+	if _, err := (&ExecutionService{}).resolveScript(cmd, nil); err == nil {
+		t.Fatal("resolveScript accepted a missing variable without a default")
+	}
+}
+
 func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 

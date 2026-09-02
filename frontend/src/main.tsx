@@ -36,7 +36,7 @@ if (isLauncherWindow) {
             const t = s.theme || 'vscode-dark'
             const custom = resolveActiveCustomTheme(s.customThemes, t)
             setTheme(t)
-            applyTheme(t, custom?.colors ?? null)
+            applyTheme(t, custom?.colors)
             applyDensity(s.density || 'comfortable')
             applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
         }, [])
@@ -111,7 +111,7 @@ if (isLauncherWindow) {
                 // removed or reset elsewhere.
                 syncCustomThemes(parsed)
                 const loadedCustom = parsed.find(c => c.id === t)
-                applyTheme(t, loadedCustom?.colors ?? null)
+                applyTheme(t, loadedCustom?.colors)
                 applyDensity(s.density || 'comfortable')
                 applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
             }).catch(() => {})
@@ -131,7 +131,7 @@ if (isLauncherWindow) {
             const builtIn = THEMES.find(t => t.id === newTheme)
             const custom = customThemesRef.current.find(t => t.id === newTheme)
             const themeType = builtIn?.type ?? custom?.type ?? 'dark'
-            applyTheme(newTheme, custom?.colors ?? null)
+            applyTheme(newTheme, custom?.colors)
             if (themeType === 'dark') {
                 setLastDarkTheme(newTheme)
                 document.documentElement.style.setProperty('--cmdex-last-dark-theme', newTheme)
@@ -206,7 +206,7 @@ if (isLauncherWindow) {
             setLastDarkTheme(s?.lastDarkTheme || 'vscode-dark')
             setLastLightTheme(s?.lastLightTheme || 'vscode-light')
             syncCustomThemes([])
-            applyTheme(t, null)
+            applyTheme(t)
             applyDensity(s?.density || 'comfortable')
             applyFonts(s?.uiFont || 'Inter', s?.monoFont || 'JetBrains Mono')
             // The main window is holding stale commands/categories *and*

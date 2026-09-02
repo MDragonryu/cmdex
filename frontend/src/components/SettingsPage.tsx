@@ -304,7 +304,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   // prop-sync loop that zeroed out the dirty state.
   useEffect(() => {
     const custom = customThemes?.find(c => c.id === draftTheme);
-    applyTheme(draftTheme, custom?.colors ?? null);
+    applyTheme(draftTheme, custom?.colors);
   }, [draftTheme, customThemes]);
 
   useEffect(() => {
@@ -326,7 +326,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
       // eslint-disable-next-line react-hooks/exhaustive-deps -- syncedRef.current is intentionally read in cleanup for latest value
       const { savedTheme: st, savedDensity: sd, savedUiFont: suf, savedMonoFont: smf, customThemes: ct } = savedSettingsRef.current;
       const custom = ct?.find(c => c.id === st);
-      applyTheme(st, custom?.colors ?? null);
+      applyTheme(st, custom?.colors);
       applyDensity(sd);
       applyFonts(suf, smf);
     };

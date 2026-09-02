@@ -178,9 +178,14 @@ type LauncherService struct {
 	// particular, the settings read must stay ordered with unregister,
 	// register, and the final status publication when startup and frontend
 	// settings changes overlap.
-	applyMu            sync.Mutex
-	loginMu            sync.Mutex
-	loginOp            uint64
+	applyMu sync.Mutex
+	loginMu sync.Mutex
+	loginOp uint64
+	// Wails window methods run asynchronously, so native IsVisible can lag
+	// behind an earlier Show or Hide request.
+	visibilityMu       sync.Mutex
+	visibilityTarget   bool
+	visibilityOp       uint64
 	setAutostartFn     func(bool) error
 	autostartEnabledFn func() bool
 	persistLoginFn     func(bool) error
@@ -332,7 +337,76 @@ func (s *LauncherService) Show() {
 		return
 	}
 
+	s.enqueueVisibility(w, true)
+}
+
+// Hide conceals only the launcher panel without activating or focusing the
+// main Cmdex window, and without destroying the panel or its terminal session.
+func (s *LauncherService) Hide() {
+	s.mu.Lock()
+	w := s.window
+	s.mu.Unlock()
+	if w == nil {
+		return
+	}
+	s.enqueueVisibility(w, false)
+}
+
+// Toggle shows the launcher when hidden and hides it when visible. This is what
+// the global shortcut invokes.
+func (s *LauncherService) Toggle() {
+	s.mu.Lock()
+	s.createWindowLocked()
+	w := s.window
+	s.mu.Unlock()
+
+	if w == nil {
+		return
+	}
+
+	target, op := s.nextVisibilityTarget()
+	if target {
+		s.mu.Lock()
+		s.shownAt = time.Now()
+		s.mu.Unlock()
+	}
+	s.enqueueVisibilityOperation(w, target, op)
+}
+
+// enqueueVisibility tracks the desired state separately from native window
+// state and drops stale operations before they reach the UI thread.
+func (s *LauncherService) enqueueVisibility(w *application.WebviewWindow, visible bool) {
+	s.visibilityMu.Lock()
+	s.visibilityTarget = visible
+	s.visibilityOp++
+	op := s.visibilityOp
+	s.visibilityMu.Unlock()
+	s.enqueueVisibilityOperation(w, visible, op)
+}
+
+func (s *LauncherService) nextVisibilityTarget() (bool, uint64) {
+	s.visibilityMu.Lock()
+	defer s.visibilityMu.Unlock()
+	s.visibilityTarget = !s.visibilityTarget
+	s.visibilityOp++
+	return s.visibilityTarget, s.visibilityOp
+}
+
+func (s *LauncherService) enqueueVisibilityOperation(w *application.WebviewWindow, visible bool, op uint64) {
 	application.InvokeAsync(func() {
+		s.visibilityMu.Lock()
+		current := op == s.visibilityOp && visible == s.visibilityTarget
+		s.visibilityMu.Unlock()
+		if !current {
+			return
+		}
+
+		if !visible {
+			w.Hide()
+			wailsApp.Event.Emit(eventNames.LauncherHidden)
+			return
+		}
+
 		var targetDisplay uint32
 		presentLauncherWindow(
 			func() { targetDisplay = launcherDisplayUnderMouseNative() },
@@ -349,38 +423,8 @@ func (s *LauncherService) Show() {
 			func() { s.positionWindow(w, launcherHeight) },
 			func() { w.Focus() },
 		)
-		// Tell the UI to reset: focus the search field and select existing text.
 		wailsApp.Event.Emit(eventNames.LauncherShown)
 	})
-}
-
-// Hide conceals only the launcher panel without activating or focusing the
-// main Cmdex window, and without destroying the panel or its terminal session.
-func (s *LauncherService) Hide() {
-	s.mu.Lock()
-	w := s.window
-	s.mu.Unlock()
-	if w == nil {
-		return
-	}
-	application.InvokeAsync(func() {
-		w.Hide()
-		wailsApp.Event.Emit(eventNames.LauncherHidden)
-	})
-}
-
-// Toggle shows the launcher when hidden and hides it when visible. This is what
-// the global shortcut invokes.
-func (s *LauncherService) Toggle() {
-	s.mu.Lock()
-	w := s.window
-	s.mu.Unlock()
-
-	if w != nil && w.IsVisible() {
-		s.Hide()
-		return
-	}
-	s.Show()
 }
 
 // Resize switches the launcher between its compact and expanded heights, used
@@ -663,13 +707,14 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 		Shortcut:  DefaultLauncherShortcut,
 	}
 	s.sessionMu.Lock()
-	status.Error = s.sessionErr
+	sessionErr := s.sessionErr
+	status.Error = sessionErr
 	s.sessionMu.Unlock()
 
 	settings, err := db.GetSettings()
 	if err != nil {
 		status.Error = fmt.Sprintf("read settings: %v", err)
-		s.setStatus(status)
+		status = s.setStatusFromApply(status, sessionErr)
 		return status
 	}
 
@@ -688,20 +733,20 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	}
 
 	if !status.Enabled {
-		s.setStatus(status)
+		status = s.setStatusFromApply(status, sessionErr)
 		return status
 	}
 	if s.hotkeys == nil {
 		status.Supported = false
 		status.Error = "Global shortcuts are unavailable on this platform."
-		s.setStatus(status)
+		status = s.setStatusFromApply(status, sessionErr)
 		return status
 	}
 
 	if validator, ok := s.hotkeys.(interface{ Validate(string) error }); ok {
 		if err := validator.Validate(status.Shortcut); err != nil {
 			status.Error = err.Error()
-			s.setStatus(status)
+			status = s.setStatusFromApply(status, sessionErr)
 			return status
 		}
 	}
@@ -711,7 +756,7 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 		if strings.Contains(strings.ToLower(err.Error()), "not supported") {
 			status.Supported = false
 		}
-		s.setStatus(status)
+		status = s.setStatusFromApply(status, sessionErr)
 		return status
 	}
 
@@ -719,7 +764,7 @@ func (s *LauncherService) ApplySettings() LauncherStatus {
 	if status.Registered {
 		s.registeredShortcut = status.Shortcut
 	}
-	s.setStatus(status)
+	status = s.setStatusFromApply(status, sessionErr)
 	return status
 }
 
@@ -802,6 +847,25 @@ func (s *LauncherService) setStatus(status LauncherStatus) {
 	s.mu.Lock()
 	s.status = status
 	s.mu.Unlock()
+}
+
+// setStatusFromApply publishes an ApplySettings result without allowing its
+// session-error snapshot to overwrite a newer eager-session result. Locks are
+// acquired in the same order as publishSessionError, making the snapshot and
+// status publication one transaction from observers' perspective.
+func (s *LauncherService) setStatusFromApply(status LauncherStatus, sessionErrAtRead string) LauncherStatus {
+	s.sessionMu.Lock()
+	currentSessionErr := s.sessionErr
+	if currentSessionErr != sessionErrAtRead {
+		if currentSessionErr != "" || status.Error == sessionErrAtRead {
+			status.Error = currentSessionErr
+		}
+	}
+	s.mu.Lock()
+	s.status = status
+	s.mu.Unlock()
+	s.sessionMu.Unlock()
+	return status
 }
 
 // registrationHint turns a raw Wails registration failure into text suitable
