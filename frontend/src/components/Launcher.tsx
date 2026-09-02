@@ -20,6 +20,7 @@ import {
   applyRefreshedPresets,
   createLauncherResizeQueue,
   isCurrentLauncherRequest,
+  isCurrentLauncherPresetRefresh,
   transitionLauncherQuery,
   type LauncherStage,
 } from '../utils/launcher';
@@ -61,9 +62,9 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
   const [pendingCommand, setPendingCommand] = useState<Command | null>(null);
   const [variables, setVariables] = useState<VariablePromptType[]>([]);
   const [ranCommand, setRanCommand] = useState<Command | null>(null);
-  const [eventsInitialized, setEventsInitialized] = useState(false);
   const activationRef = useRef(0);
   const loadRequestRef = useRef(0);
+  const presetRefreshRef = useRef(0);
   const [resizeQueue] = useState(() => createLauncherResizeQueue(async (expanded) => {
     await Resize(expanded);
   }));
@@ -144,20 +145,24 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
     focusSearch();
   }, [focusSearch, loadData, resizeLauncher]);
 
-  // Every time the window is revealed: refresh the command list (it may have
-  // changed in the main window), focus the field and select any existing text
-  // so typing replaces the previous query.
+  // Subscribe using the built-in fallback before the asynchronous event-name
+  // lookup completes. The native launcher can be shown during that lookup;
+  // delaying this listener until initialization resolves would lose that
+  // first launcher-shown event. Keep the fallback listener as well in case a
+  // backend returns a custom name after the listener is installed.
   useEffect(() => {
-    initEventNames().then(() => setEventsInitialized(true));
-  }, []);
-
-  useEffect(() => {
-    if (!eventsInitialized) return;
-    const cleanup = Events.On(eventNames.launcherShown, () => {
-      resetForShow();
+    let active = true;
+    const fallbackName = eventNames.launcherShown;
+    const cleanups: (() => void)[] = [Events.On(fallbackName, resetForShow)];
+    void initEventNames().then(() => {
+      if (!active || eventNames.launcherShown === fallbackName) return;
+      cleanups.push(Events.On(eventNames.launcherShown, resetForShow));
     });
-    return () => cleanup();
-  }, [eventsInitialized, resetForShow]);
+    return () => {
+      active = false;
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [resetForShow]);
 
   useEffect(() => {
     focusSearch();
@@ -313,7 +318,10 @@ const Launcher: React.FC<LauncherProps> = ({ theme }) => {
 
   /** Re-read the presets for a command after one was added, renamed or removed. */
   const refreshPresets = useCallback(async (cmd: Command) => {
+    const request = ++presetRefreshRef.current;
+    const activation = activationRef.current;
     const presets = await GetPresets(cmd.id);
+    if (!isCurrentLauncherPresetRefresh(request, presetRefreshRef.current, activation, activationRef.current)) return;
     setPendingCommand((current) => applyRefreshedPresets(current, cmd, presets || []));
   }, []);
 

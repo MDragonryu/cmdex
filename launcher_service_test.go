@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -410,6 +412,95 @@ func TestLauncherServiceApplySettingsWaitsForPreviousApplication(t *testing.T) {
 		if status.Platform == "" {
 			t.Error("concurrent ApplySettings returned an empty platform")
 		}
+	}
+}
+
+func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first bool
+		newer bool
+	}{
+		{name: "true to false", first: true, newer: false},
+		{name: "false to true", first: false, newer: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var callsMu sync.Mutex
+			osState := !tc.first
+			persistedState := osState
+			var autostartCalls []bool
+			var persistedCalls []bool
+			firstStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var firstCall sync.Once
+
+			service := &LauncherService{
+				autostartEnabledFn: func() bool {
+					callsMu.Lock()
+					defer callsMu.Unlock()
+					return osState
+				},
+				setAutostartFn: func(enabled bool) error {
+					callsMu.Lock()
+					osState = enabled
+					autostartCalls = append(autostartCalls, enabled)
+					callsMu.Unlock()
+					if enabled == tc.first {
+						firstCall.Do(func() { close(firstStarted) })
+						<-releaseFirst
+					}
+					return nil
+				},
+				persistLoginFn: func(enabled bool) error {
+					callsMu.Lock()
+					persistedState = enabled
+					persistedCalls = append(persistedCalls, enabled)
+					callsMu.Unlock()
+					return nil
+				},
+			}
+
+			firstResult := make(chan error, 1)
+			go func() { firstResult <- service.SetLaunchAtLogin(tc.first) }()
+			select {
+			case <-firstStarted:
+			case <-time.After(time.Second):
+				t.Fatal("first launch-at-login request did not start")
+			}
+
+			secondResult := make(chan error, 1)
+			go func() { secondResult <- service.SetLaunchAtLogin(tc.newer) }()
+			deadline := time.Now().Add(time.Second)
+			for atomic.LoadUint64(&service.loginOp) < 2 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if got := atomic.LoadUint64(&service.loginOp); got != 2 {
+				t.Fatalf("login operation generation = %d, want newer request generation 2", got)
+			}
+			close(releaseFirst)
+
+			if err := <-firstResult; err != nil {
+				t.Fatalf("superseded launch-at-login request failed: %v", err)
+			}
+			if err := <-secondResult; err != nil {
+				t.Fatalf("newer launch-at-login request failed: %v", err)
+			}
+
+			callsMu.Lock()
+			defer callsMu.Unlock()
+			if osState != tc.newer || persistedState != tc.newer {
+				t.Fatalf("final launch-at-login state = os:%t persisted:%t, want %t", osState, persistedState, tc.newer)
+			}
+			if status := service.GetStatus(); status.LaunchAtLogin != tc.newer {
+				t.Fatalf("final status LaunchAtLogin = %t, want %t", status.LaunchAtLogin, tc.newer)
+			}
+			if want := []bool{tc.first, tc.newer}; !reflect.DeepEqual(autostartCalls, want) {
+				t.Fatalf("autostart calls = %v, want serialized requests %v", autostartCalls, want)
+			}
+			if want := []bool{tc.newer}; !reflect.DeepEqual(persistedCalls, want) {
+				t.Fatalf("persisted launch-at-login calls = %v, want only newer request %v", persistedCalls, want)
+			}
+		})
 	}
 }
 

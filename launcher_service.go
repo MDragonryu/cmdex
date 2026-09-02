@@ -181,6 +181,9 @@ type LauncherService struct {
 	applyMu            sync.Mutex
 	loginMu            sync.Mutex
 	loginOp            uint64
+	setAutostartFn     func(bool) error
+	autostartEnabledFn func() bool
+	persistLoginFn     func(bool) error
 	window             *application.WebviewWindow
 	hotkeys            launcherHotkeyManager
 	stopStart          func()
@@ -735,23 +738,64 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		return nil
 	}
 
-	previous := autostartEnabled()
-	if err := setAutostart(enabled); err != nil {
+	previous := s.autostartEnabled()
+	if !s.loginRequestCurrent(op) {
+		return nil
+	}
+	if err := s.setAutostart(enabled); err != nil {
 		return err
 	}
-	if err := db.SetSettings(AppSettings{LaunchAtLogin: &enabled}); err != nil {
+	if !s.loginRequestCurrent(op) {
+		// Keep the full OS+persistence mutation serialized under loginMu. A
+		// newer request is queued behind this call and owns the next complete
+		// mutation; rolling back here could overwrite that newer intent if the
+		// platform callback completed it independently.
+		return nil
+	}
+	if err := s.persistLaunchAtLogin(enabled); err != nil {
 		// The login item is already installed or removed at this point. Undo it
 		// so the OS state cannot disagree with the persisted preference.
-		if rollbackErr := setAutostart(previous); rollbackErr != nil {
+		if rollbackErr := s.setAutostart(previous); rollbackErr != nil {
 			return fmt.Errorf("persist launch-at-login: %w; restore login item: %w", err, rollbackErr)
 		}
 		return fmt.Errorf("persist launch-at-login: %w", err)
 	}
+	if !s.loginRequestCurrent(op) {
+		// Do not restore the old value here. The newer request is serialized
+		// behind this one and will immediately publish its desired final state;
+		// an old-value rollback could clobber that newer intent.
+		return nil
+	}
 
 	s.mu.Lock()
-	s.status.LaunchAtLogin = autostartEnabled()
+	s.status.LaunchAtLogin = s.autostartEnabled()
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *LauncherService) loginRequestCurrent(op uint64) bool {
+	return op == atomic.LoadUint64(&s.loginOp)
+}
+
+func (s *LauncherService) setAutostart(enabled bool) error {
+	if s.setAutostartFn != nil {
+		return s.setAutostartFn(enabled)
+	}
+	return setAutostart(enabled)
+}
+
+func (s *LauncherService) autostartEnabled() bool {
+	if s.autostartEnabledFn != nil {
+		return s.autostartEnabledFn()
+	}
+	return autostartEnabled()
+}
+
+func (s *LauncherService) persistLaunchAtLogin(enabled bool) error {
+	if s.persistLoginFn != nil {
+		return s.persistLoginFn(enabled)
+	}
+	return db.SetSettings(AppSettings{LaunchAtLogin: &enabled})
 }
 
 func (s *LauncherService) setStatus(status LauncherStatus) {

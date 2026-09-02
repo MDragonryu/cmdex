@@ -14,6 +14,26 @@ export function isCurrentLauncherRequest(request: number, currentRequest: number
 }
 
 /**
+ * A preset refresh may update the prompt only while both its request and the
+ * prompt activation that started it are still current. The activation check
+ * handles closing and reopening the same command; the request check handles
+ * overlapping refreshes within one prompt.
+ */
+export function isCurrentLauncherPresetRefresh(
+  request: number,
+  currentRequest: number,
+  activation: number,
+  currentActivation: number,
+): boolean {
+  return isCurrentLauncherRequest(request, currentRequest) && activation === currentActivation;
+}
+
+/** Clear a captured shortcut only when it is still the shortcut being saved. */
+export function clearPendingShortcutIfCurrent(current: string, committed: string): string {
+  return current === committed ? '' : current;
+}
+
+/**
  * Serialize launcher resize effects and coalesce requests that have not
  * started yet. A resize already in flight is followed by the latest request,
  * so an old completion cannot leave the persistent launcher at a stale size.

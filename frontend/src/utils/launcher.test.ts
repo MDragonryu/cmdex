@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyRefreshedPresets,
   createLauncherResizeQueue,
+  clearPendingShortcutIfCurrent,
+  isCurrentLauncherPresetRefresh,
   isCurrentLauncherRequest,
   transitionLauncherQuery,
 } from './launcher';
@@ -73,6 +75,21 @@ describe('launcher async request guards', () => {
   it('rejects a launcher data response once a newer request starts', () => {
     expect(isCurrentLauncherRequest(1, 2)).toBe(false);
     expect(isCurrentLauncherRequest(2, 2)).toBe(true);
+  });
+
+  it('requires both the refresh and prompt activation to remain current', () => {
+    expect(isCurrentLauncherPresetRefresh(2, 2, 7, 7)).toBe(true);
+    // Same command reopened: the ID can still match, but its old activation
+    // must not be allowed to update the new prompt.
+    expect(isCurrentLauncherPresetRefresh(2, 2, 6, 7)).toBe(false);
+    // Same prompt with overlapping refreshes: only the newest generation may
+    // update its preset list.
+    expect(isCurrentLauncherPresetRefresh(1, 2, 7, 7)).toBe(false);
+  });
+
+  it('does not clear a newer shortcut capture when an older save settles', () => {
+    expect(clearPendingShortcutIfCurrent('Ctrl+K', 'Ctrl+K')).toBe('');
+    expect(clearPendingShortcutIfCurrent('Ctrl+L', 'Ctrl+K')).toBe('Ctrl+L');
   });
 
   it('applies resize requests in order so a reset wins over an older resize', async () => {

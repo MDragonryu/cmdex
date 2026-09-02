@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { SetSettings } from '../../bindings/cmdex/settingsservice';
 import { createLatestAsyncQueue, type AsyncQueueResult } from '../utils/asyncQueue';
+import { clearPendingShortcutIfCurrent } from '../utils/launcher';
 import {
   ApplySettings,
   GetStatus,
@@ -121,8 +122,8 @@ const LauncherSettings: React.FC = () => {
         { launcherShortcut: accelerator },
         () => ValidateShortcut(accelerator),
       );
+      setPendingShortcut((current) => clearPendingShortcutIfCurrent(current, accelerator));
       if (result.current) {
-        setPendingShortcut('');
         if (result.value.enabled && !result.value.registered && result.value.error) {
           toast.error(result.value.error);
         }
@@ -130,7 +131,7 @@ const LauncherSettings: React.FC = () => {
     } catch (err) {
       const message = (err as { message?: unknown })?.message ?? err;
       toast.error(t('settings.launcherSaveFailed', { message: String(message) }));
-      setPendingShortcut('');
+      setPendingShortcut((current) => clearPendingShortcutIfCurrent(current, accelerator));
     }
   }, [persist, t]);
 
