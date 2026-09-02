@@ -97,6 +97,10 @@ const LauncherSettings: React.FC = () => {
   }, []);
 
   const refresh = useCallback(async () => {
+    // Invalidate the component-level operation token alongside the queue
+    // generation. Otherwise a failure from an already queued operation can
+    // still start a recovery GetStatus after this refresh began.
+    latestSettingsOperationRef.current += 1;
     const generation = settingsQueue.invalidate();
     try {
       const next = await GetStatus() as LauncherStatus;

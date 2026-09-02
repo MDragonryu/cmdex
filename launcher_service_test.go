@@ -719,8 +719,8 @@ func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
 			}
 			close(releaseFirst)
 
-			if err := <-firstResult; err != nil {
-				t.Fatalf("superseded launch-at-login request failed: %v", err)
+			if err := <-firstResult; !errors.Is(err, errLaunchAtLoginSuperseded) {
+				t.Fatalf("superseded launch-at-login error = %v, want superseded error", err)
 			}
 			if err := <-secondResult; err != nil {
 				t.Fatalf("newer launch-at-login request failed: %v", err)
@@ -789,6 +789,65 @@ func TestLauncherSessionRejectsEmptyID(t *testing.T) {
 	defer service.sessionMu.Unlock()
 	if service.sessionID != "" {
 		t.Fatalf("sessionID = %q, want no session recorded", service.sessionID)
+	}
+}
+
+func TestLauncherSessionTimeoutDetachesFlightAndClosesLateSuccess(t *testing.T) {
+	firstRelease := make(chan struct{})
+	firstStarted := make(chan struct{})
+	var creates atomic.Int32
+	closed := make(chan string, 1)
+
+	service := &LauncherService{
+		createSessionFn: func() (*SessionInfo, error) {
+			if creates.Add(1) == 1 {
+				close(firstStarted)
+				<-firstRelease
+				return &SessionInfo{ID: "late-session"}, nil
+			}
+			return &SessionInfo{ID: "recovered-session"}, nil
+		},
+		sessionExistsFn: func(id string) bool { return id == "recovered-session" },
+		closeSessionFn: func(id string) error {
+			closed <- id
+			return nil
+		},
+		sessionShutdown: make(chan struct{}),
+	}
+
+	if _, err := service.ensureSession(10 * time.Millisecond); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("timed-out ensureSession error = %v, want timeout", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first session creator did not start")
+	}
+
+	id, err := service.ensureSession(time.Second)
+	if err != nil {
+		t.Fatalf("recovery ensureSession failed: %v", err)
+	}
+	if id != "recovered-session" {
+		t.Fatalf("recovered session ID = %q, want recovered-session", id)
+	}
+
+	close(firstRelease)
+	select {
+	case id := <-closed:
+		if id != "late-session" {
+			t.Fatalf("late session cleanup ID = %q, want late-session", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("late session was not closed after timed-out flight")
+	}
+	if got := creates.Load(); got != 2 {
+		t.Fatalf("session creator calls = %d, want 2", got)
+	}
+	service.sessionMu.Lock()
+	defer service.sessionMu.Unlock()
+	if service.sessionID != "recovered-session" {
+		t.Fatalf("sessionID = %q, late creator overwrote recovered session", service.sessionID)
 	}
 }
 

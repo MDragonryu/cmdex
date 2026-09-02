@@ -160,7 +160,7 @@ Pure functions, no I/O:
 
 - **`GenerateScript`** — trims the body and adds a trailing newline. **It does not add a shebang.**
 - **`ParseScriptBody`** — strips a leading `#!` line, so scripts saved by older versions (which did store `#!/bin/bash`) still edit cleanly.
-- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and substitution. Unresolved placeholders are left as-is.
+- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and verbatim substitution. Unresolved placeholders are left as-is; command authors add shell quoting when a value must remain one word.
 - **`MergeDetectedVars`** — merges auto-detected variables with manually defined ones: detected first in detection order, then manual-only variables with their relative order preserved, with metadata (description, default, example) carried over.
 
 ### Working Directory Resolution

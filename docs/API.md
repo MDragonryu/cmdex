@@ -456,6 +456,11 @@ const record: ExecutionRecord = await RunCommand(cmd.id, { message: 'hello world
 3. Resolves the active session's shell (falling back to `detectShell()` if the session hasn't started yet) and the working directory (empty if none is configured), then calls `buildCommandLine(shellPath, script, workingDir)` (`executor.go`).
 4. `buildCommandLine` prefixes a shell-dialect-correct `cd` (only if a working directory was resolved) — POSIX `cd '<dir>' && `, cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` — and terminates every line with the dialect's submit key (`\n` for POSIX, `\r` for cmd.exe/PowerShell — ConPTY has no tty line discipline and treats a bare LF as a literal keystroke rather than Enter). The result is passed to `TerminalService.Write` on the active session.
 
+Template values are substituted verbatim, including shell metacharacters. This
+deliberately supports variables that expand to shell fragments such as flag
+lists or pipelines; quote a placeholder in the command template when the
+value must be treated as one shell word.
+
 **Because it goes through a real PTY:**
 
 - There is **no timeout** and no output cap on execution — the command runs until it finishes, exactly as if typed.

@@ -60,6 +60,8 @@ const (
 	launcherBlurGrace = 300 * time.Millisecond
 )
 
+var errLaunchAtLoginSuperseded = errors.New("launch-at-login request superseded by newer request")
+
 func launcherMacOptions() application.MacWindow {
 	return application.MacWindow{
 		// Wails creates a real non-activating NSPanel on macOS. Show and Focus
@@ -350,6 +352,12 @@ func (s *LauncherService) createWindowLocked() {
 	w := wailsApp.Window.NewWithOptions(options)
 
 	w.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		// A delayed focus-loss notification can arrive after a newer Show has
+		// already focused the panel. Native focus is authoritative in that case;
+		// do not hide the newly shown launcher.
+		if w.IsFocused() {
+			return
+		}
 		s.mu.Lock()
 		withinGrace := time.Since(s.shownAt) < launcherBlurGrace
 		s.mu.Unlock()
@@ -590,6 +598,7 @@ func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 			case <-shutdown:
 				return "", errors.New("launcher service is shutting down")
 			case <-deadline.C:
+				s.abandonSessionCreate(done)
 				return "", errors.New("launcher terminal startup timed out")
 			}
 		}
@@ -618,6 +627,7 @@ func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 		case <-sessionShutdown:
 			return "", errors.New("launcher service is shutting down")
 		case <-deadline.C:
+			s.abandonSessionCreate(done)
 			return "", errors.New("launcher terminal startup timed out")
 		}
 		if err != nil {
@@ -643,6 +653,16 @@ func (s *LauncherService) ensureSession(timeout time.Duration) (string, error) {
 
 func (s *LauncherService) completeSessionCreate(done chan struct{}, info *SessionInfo, err error) {
 	s.sessionMu.Lock()
+	if s.sessionDone != done {
+		// The waiter timed out and detached this flight. A late success belongs
+		// to no current owner; close the PTY so recovery cannot leak a session.
+		validInfo := info != nil && strings.TrimSpace(info.ID) != ""
+		s.sessionMu.Unlock()
+		if err == nil && validInfo {
+			s.closeLauncherSession(info.ID)
+		}
+		return
+	}
 	s.sessionCreating = false
 	validInfo := info != nil && strings.TrimSpace(info.ID) != ""
 	if err == nil && validInfo && !s.sessionShuttingDown {
@@ -670,6 +690,22 @@ func (s *LauncherService) completeSessionCreate(done chan struct{}, info *Sessio
 	if shuttingDown && err == nil && validInfo {
 		s.closeLauncherSession(info.ID)
 	}
+}
+
+// abandonSessionCreate detaches a timed-out waiter from the current creator.
+// The creator is allowed to finish, but its result is ignored by
+// completeSessionCreate unless a waiter is still attached to that flight.
+// Closing done wakes other waiters so they can start a fresh attempt.
+func (s *LauncherService) abandonSessionCreate(done chan struct{}) {
+	s.sessionMu.Lock()
+	if !s.sessionCreating || s.sessionDone != done {
+		s.sessionMu.Unlock()
+		return
+	}
+	s.sessionCreating = false
+	s.sessionDone = nil
+	close(done)
+	s.sessionMu.Unlock()
 }
 
 func (s *LauncherService) createLauncherSession() (*SessionInfo, error) {
@@ -844,12 +880,12 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 	// If a newer request arrived while this one waited for the lock, let that
 	// request own the final state rather than applying an older user intent.
 	if op != atomic.LoadUint64(&s.loginOp) {
-		return nil
+		return errLaunchAtLoginSuperseded
 	}
 
 	previous := s.autostartEnabled()
 	if !s.loginRequestCurrent(op) {
-		return nil
+		return errLaunchAtLoginSuperseded
 	}
 	if err := s.setAutostart(enabled); err != nil {
 		return err
@@ -859,7 +895,7 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		// newer request is queued behind this call and owns the next complete
 		// mutation; rolling back here could overwrite that newer intent if the
 		// platform callback completed it independently.
-		return nil
+		return errLaunchAtLoginSuperseded
 	}
 	if err := s.persistLaunchAtLogin(enabled); err != nil {
 		// The login item is already installed or removed at this point. Undo it
@@ -873,7 +909,7 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		// Do not restore the old value here. The newer request is serialized
 		// behind this one and will immediately publish its desired final state;
 		// an old-value rollback could clobber that newer intent.
-		return nil
+		return errLaunchAtLoginSuperseded
 	}
 
 	s.mu.Lock()
