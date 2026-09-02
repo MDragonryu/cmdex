@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,9 +23,16 @@ type recordingLauncherHotkeyManager struct {
 	shortcut        string
 	callback        func()
 	registrationErr error
+	registerStarted chan struct{}
+	registerRelease chan struct{}
+	registerOnce    sync.Once
 }
 
 func (m *recordingLauncherHotkeyManager) Register(shortcut string, callback func()) error {
+	if m.registerStarted != nil {
+		m.registerOnce.Do(func() { close(m.registerStarted) })
+		<-m.registerRelease
+	}
 	m.mu.Lock()
 	m.registers++
 	err := m.registrationErr
@@ -299,6 +307,7 @@ func TestLauncherServiceStartupDisabledDoesNotRegister(t *testing.T) {
 	if err := service.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
 		t.Fatalf("ServiceStartup failed: %v", err)
 	}
+	t.Cleanup(func() { _ = service.ServiceShutdown() })
 
 	deadline := time.Now().Add(time.Second)
 	for service.GetStatus().Platform == "" && time.Now().Before(deadline) {
@@ -309,6 +318,69 @@ func TestLauncherServiceStartupDisabledDoesNotRegister(t *testing.T) {
 	}
 	if status := service.GetStatus(); status.Enabled || status.Registered {
 		t.Fatalf("startup status = %+v, want disabled and unregistered", status)
+	}
+}
+
+func TestLauncherServiceShutdownUnregistersStartupRegistration(t *testing.T) {
+	testDB := launcherTestDB(t)
+	enabled := true
+	if err := testDB.SetSettings(AppSettings{LauncherEnabled: &enabled}); err != nil {
+		t.Fatalf("enable launcher: %v", err)
+	}
+
+	manager := &recordingLauncherHotkeyManager{
+		registerStarted: make(chan struct{}),
+		registerRelease: make(chan struct{}),
+	}
+	useLauncherHotkeyManager(t, manager)
+
+	previousWailsApp := wailsApp
+	previousTerminalSvc := terminalSvc
+	wailsApp = nil
+	terminalSvc = nil
+	t.Cleanup(func() {
+		wailsApp = previousWailsApp
+		terminalSvc = previousTerminalSvc
+	})
+
+	service := &LauncherService{}
+	if err := service.ServiceStartup(context.Background(), application.ServiceOptions{}); err != nil {
+		t.Fatalf("ServiceStartup failed: %v", err)
+	}
+
+	select {
+	case <-manager.registerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("startup ApplySettings did not attempt shortcut registration")
+	}
+	shutdownDone := make(chan struct{})
+	go func() {
+		_ = service.ServiceShutdown()
+		close(shutdownDone)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		service.startupMu.Lock()
+		stopping := service.startupShuttingDown
+		service.startupMu.Unlock()
+		if stopping {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ServiceShutdown did not close startup admission")
+		}
+		runtime.Gosched()
+	}
+	close(manager.registerRelease)
+
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("ServiceShutdown did not join startup work")
+	}
+	if manager.IsRegistered("") {
+		t.Fatal("ServiceShutdown left the startup shortcut registered")
 	}
 }
 

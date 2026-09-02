@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { CUSTOM_THEME_VAR_KEYS, parseCustomThemes } from './theme-apply';
+import { applyTheme, CUSTOM_THEME_VAR_KEYS, parseCustomThemes } from './theme-apply';
 
 function colors() {
   return Object.fromEntries(CUSTOM_THEME_VAR_KEYS.map(key => [key, '#000'])) as Record<string, string>;
@@ -31,5 +31,28 @@ describe('parseCustomThemes', () => {
       theme({ colors: invalidValue }),
       null,
     ]))).toEqual([]);
+  });
+});
+
+describe('applyTheme', () => {
+  it('tolerates legacy null custom colors', () => {
+    const setAttribute = vi.fn();
+    const removeProperty = vi.fn();
+    const setProperty = vi.fn();
+    vi.stubGlobal('document', {
+      documentElement: {
+        setAttribute,
+        style: { removeProperty, setProperty },
+      },
+    });
+
+    try {
+      expect(() => applyTheme('dark', null)).not.toThrow();
+      expect(setAttribute).toHaveBeenCalledWith('data-theme', 'dark');
+      expect(removeProperty).toHaveBeenCalledTimes(CUSTOM_THEME_VAR_KEYS.length);
+      expect(setProperty).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

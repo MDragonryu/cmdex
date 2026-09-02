@@ -204,6 +204,21 @@ func TestResolveScript_RequiresDefinitionWithoutDefault(t *testing.T) {
 	}
 }
 
+func TestResolveScript_IgnoresUnusedRequiredDefinition(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo hello",
+		Variables:     []VariableDefinition{{Name: "unused"}},
+	}
+
+	resolved, err := (&ExecutionService{}).resolveScript(cmd, nil)
+	if err != nil {
+		t.Fatalf("resolveScript rejected an unused required definition: %v", err)
+	}
+	if resolved != "echo hello" {
+		t.Fatalf("resolved script = %q, want unchanged script", resolved)
+	}
+}
+
 func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 

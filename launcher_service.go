@@ -161,6 +161,12 @@ var newLauncherHotkeyManager = func() launcherHotkeyManager {
 // state or respawns a shell.
 type LauncherService struct {
 	mu sync.Mutex
+	// startupMu coordinates asynchronous startup callbacks with shutdown. Wails
+	// may tear down the database immediately after ServiceShutdown returns, so
+	// startup work must be joined before that boundary is crossed.
+	startupMu           sync.Mutex
+	startupWG           sync.WaitGroup
+	startupShuttingDown bool
 	// sessionMu serializes launcher-session creation/replacement independently
 	// from window and shortcut state. This is intentionally single-flight: the
 	// eager startup and concurrent GetSessionID calls must never create two
@@ -206,6 +212,9 @@ type launcherSessionResult struct {
 // ServiceStartup creates the launcher window up front (hidden) and applies the
 // persisted launcher settings.
 func (s *LauncherService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	s.startupMu.Lock()
+	s.startupShuttingDown = false
+	s.startupMu.Unlock()
 	s.hotkeys = newLauncherHotkeyManager()
 	launcherSvc = s
 	s.sessionMu.Lock()
@@ -232,14 +241,14 @@ func (s *LauncherService) ServiceStartup(ctx context.Context, options applicatio
 				// TerminalService is registered before LauncherService. Starting
 				// here ensures its shell integration and default user session are
 				// ready, while keeping app startup responsive.
-				go s.startEagerSession()
-				s.ApplySettings()
+				s.runStartupAsync(s.startEagerSession)
+				s.runStartupAsync(func() { s.ApplySettings() })
 			},
 		)
 	} else {
 		// The nil-app path is used by unit tests which inject the manager seam.
-		go s.startEagerSession()
-		go s.ApplySettings()
+		s.runStartupAsync(s.startEagerSession)
+		s.runStartupAsync(func() { s.ApplySettings() })
 	}
 	return nil
 }
@@ -250,12 +259,12 @@ func (s *LauncherService) ServiceShutdown() error {
 		s.stopStart()
 		s.stopStart = nil
 	}
-	s.applyMu.Lock()
-	if s.hotkeys != nil && s.registeredShortcut != "" {
-		_ = s.hotkeys.Unregister(s.registeredShortcut)
-		s.registeredShortcut = ""
-	}
-	s.applyMu.Unlock()
+	// Close the startup admission gate before waiting. A callback that was
+	// already admitted may still be about to acquire applyMu and register a
+	// shortcut, so final unregistration must happen after startup work joins.
+	s.startupMu.Lock()
+	s.startupShuttingDown = true
+	s.startupMu.Unlock()
 
 	s.sessionMu.Lock()
 	if !s.sessionShuttingDown {
@@ -273,7 +282,37 @@ func (s *LauncherService) ServiceShutdown() error {
 	// A creator that is already in the backend cannot be cancelled safely, but
 	// it observes sessionShuttingDown and closes any late result. Waiters are
 	// woken by sessionShutdown above; do not block shutdown on PTY startup.
+	s.startupWG.Wait()
+
+	// ApplySettings may have been admitted before shutdown and can therefore
+	// have registered a shortcut after the old unregister step. Once all such
+	// work is joined, this final transaction cannot be undone by startup code.
+	s.applyMu.Lock()
+	if s.hotkeys != nil && s.registeredShortcut != "" {
+		_ = s.hotkeys.Unregister(s.registeredShortcut)
+		s.registeredShortcut = ""
+	}
+	s.applyMu.Unlock()
 	return nil
+}
+
+// runStartupAsync tracks work started by ServiceStartup so ServiceShutdown
+// can join it before application-owned globals, including db, are released.
+// The lifecycle lock closes the Add/Wait race when an application-start event
+// arrives concurrently with shutdown.
+func (s *LauncherService) runStartupAsync(work func()) {
+	s.startupMu.Lock()
+	if s.startupShuttingDown {
+		s.startupMu.Unlock()
+		return
+	}
+	s.startupWG.Add(1)
+	s.startupMu.Unlock()
+
+	go func() {
+		defer s.startupWG.Done()
+		work()
+	}()
 }
 
 // createWindowLocked builds the hidden launcher window. Caller must hold s.mu.

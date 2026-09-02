@@ -112,7 +112,9 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 // resolveScript applies the same default and required-variable rules to every
 // execution entry point. A caller may omit a variable when its definition has
 // a literal or CEL default; variables with no usable value are rejected before
-// anything is written to a PTY.
+// anything is written to a PTY. Definitions that are not referenced by the
+// script are intentionally ignored, since manual variable lists may contain
+// metadata for a command's other scripts or future edits.
 func (s *ExecutionService) resolveScript(cmd Command, variables map[string]string) (string, error) {
 	resolved := make(map[string]string, len(cmd.Variables)+len(variables))
 	eval := executor
@@ -121,7 +123,14 @@ func (s *ExecutionService) resolveScript(cmd Command, variables map[string]strin
 	}
 	maps.Copy(resolved, eval.EvalDefaults(cmd.Variables))
 	maps.Copy(resolved, variables)
+	usedVariables := make(map[string]struct{})
+	for _, name := range ExtractTemplateVars(cmd.ScriptContent) {
+		usedVariables[name] = struct{}{}
+	}
 	for _, definition := range cmd.Variables {
+		if _, used := usedVariables[definition.Name]; !used {
+			continue
+		}
 		// An explicitly configured default makes the variable optional even
 		// when evaluating that default produces an empty string (for example,
 		// env("UNSET_NAME")). An empty default field is the legacy marker for
