@@ -41,8 +41,7 @@ function isCustomTheme(value: unknown): value is CustomTheme {
     return false;
   }
   const colors = theme.colors as Record<string, unknown>;
-  return CUSTOM_THEME_VAR_KEYS.every((key) => typeof colors[key] === 'string')
-    && Object.values(colors).every((c) => typeof c === 'string');
+  return Object.values(colors).every((c) => typeof c === 'string');
 }
 
 /**

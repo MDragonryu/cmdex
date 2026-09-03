@@ -60,8 +60,6 @@ const (
 	launcherBlurGrace = 300 * time.Millisecond
 )
 
-var errLaunchAtLoginSuperseded = errors.New("launch-at-login request superseded by newer request")
-
 func launcherMacOptions() application.MacWindow {
 	return application.MacWindow{
 		// Wails creates a real non-activating NSPanel on macOS. Show and Focus
@@ -196,14 +194,17 @@ type LauncherService struct {
 	visibilityOp       uint64
 	setAutostartFn     func(bool) error
 	autostartEnabledFn func() bool
-	persistLoginFn     func(bool) error
-	window             *application.WebviewWindow
-	hotkeys            launcherHotkeyManager
-	stopStart          func()
-	registeredShortcut string
-	sessionID          string
-	shownAt            time.Time
-	status             LauncherStatus
+	// persistedLaunchAtLoginFn is a test seam for reading the durable setting
+	// used when an OS mutation needs to be rolled back.
+	persistedLaunchAtLoginFn func() (bool, error)
+	persistLoginFn           func(bool) error
+	window                   *application.WebviewWindow
+	hotkeys                  launcherHotkeyManager
+	stopStart                func()
+	registeredShortcut       string
+	sessionID                string
+	shownAt                  time.Time
+	status                   LauncherStatus
 }
 
 type launcherSessionResult struct {
@@ -878,14 +879,18 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	// If a newer request arrived while this one waited for the lock, let that
-	// request own the final state rather than applying an older user intent.
+	// request own the final state rather than applying an older user intent. A
+	// superseded request is a successful no-op from the Wails caller's view.
 	if op != atomic.LoadUint64(&s.loginOp) {
-		return errLaunchAtLoginSuperseded
+		return nil
 	}
 
-	previous := s.autostartEnabled()
+	previous, err := s.persistedLaunchAtLogin()
+	if err != nil {
+		return err
+	}
 	if !s.loginRequestCurrent(op) {
-		return errLaunchAtLoginSuperseded
+		return nil
 	}
 	if err := s.setAutostart(enabled); err != nil {
 		return err
@@ -895,7 +900,7 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		// newer request is queued behind this call and owns the next complete
 		// mutation; rolling back here could overwrite that newer intent if the
 		// platform callback completed it independently.
-		return errLaunchAtLoginSuperseded
+		return nil
 	}
 	if err := s.persistLaunchAtLogin(enabled); err != nil {
 		// The login item is already installed or removed at this point. Undo it
@@ -909,7 +914,7 @@ func (s *LauncherService) SetLaunchAtLogin(enabled bool) error {
 		// Do not restore the old value here. The newer request is serialized
 		// behind this one and will immediately publish its desired final state;
 		// an old-value rollback could clobber that newer intent.
-		return errLaunchAtLoginSuperseded
+		return nil
 	}
 
 	s.mu.Lock()
@@ -934,6 +939,20 @@ func (s *LauncherService) autostartEnabled() bool {
 		return s.autostartEnabledFn()
 	}
 	return autostartEnabled()
+}
+
+func (s *LauncherService) persistedLaunchAtLogin() (bool, error) {
+	if s.persistedLaunchAtLoginFn != nil {
+		return s.persistedLaunchAtLoginFn()
+	}
+	if db == nil {
+		return false, errors.New("database is not initialized")
+	}
+	settings, err := db.GetSettings()
+	if err != nil {
+		return false, fmt.Errorf("read launch-at-login setting: %w", err)
+	}
+	return settings.LaunchAtLogin != nil && *settings.LaunchAtLogin, nil
 }
 
 func (s *LauncherService) persistLaunchAtLogin(enabled bool) error {

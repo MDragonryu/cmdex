@@ -680,6 +680,11 @@ func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
 					defer callsMu.Unlock()
 					return osState
 				},
+				persistedLaunchAtLoginFn: func() (bool, error) {
+					callsMu.Lock()
+					defer callsMu.Unlock()
+					return persistedState, nil
+				},
 				setAutostartFn: func(enabled bool) error {
 					callsMu.Lock()
 					osState = enabled
@@ -719,8 +724,8 @@ func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
 			}
 			close(releaseFirst)
 
-			if err := <-firstResult; !errors.Is(err, errLaunchAtLoginSuperseded) {
-				t.Fatalf("superseded launch-at-login error = %v, want superseded error", err)
+			if err := <-firstResult; err != nil {
+				t.Fatalf("superseded launch-at-login request = %v, want successful no-op", err)
 			}
 			if err := <-secondResult; err != nil {
 				t.Fatalf("newer launch-at-login request failed: %v", err)
@@ -741,6 +746,99 @@ func TestLauncherServiceSetLaunchAtLoginSkipsSupersededRequest(t *testing.T) {
 				t.Fatalf("persisted launch-at-login calls = %v, want only newer request %v", persistedCalls, want)
 			}
 		})
+	}
+}
+
+func TestLauncherServiceSetLaunchAtLoginReportsAutostartFailure(t *testing.T) {
+	wantErr := errors.New("autostart unavailable")
+	service := &LauncherService{
+		persistedLaunchAtLoginFn: func() (bool, error) { return false, nil },
+		autostartEnabledFn:       func() bool { return false },
+		setAutostartFn:           func(bool) error { return wantErr },
+	}
+
+	if err := service.SetLaunchAtLogin(true); !errors.Is(err, wantErr) {
+		t.Fatalf("SetLaunchAtLogin error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestLauncherServiceSetLaunchAtLoginRollbackUsesPersistedStateAfterSupersededMutation(t *testing.T) {
+	var callsMu sync.Mutex
+	osState := false
+	persistedState := false
+	var autostartCalls []bool
+	var persistedCalls []bool
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var firstCall sync.Once
+	persistErr := errors.New("persist newer launch-at-login setting")
+
+	service := &LauncherService{
+		persistedLaunchAtLoginFn: func() (bool, error) {
+			callsMu.Lock()
+			defer callsMu.Unlock()
+			return persistedState, nil
+		},
+		autostartEnabledFn: func() bool {
+			callsMu.Lock()
+			defer callsMu.Unlock()
+			return osState
+		},
+		setAutostartFn: func(enabled bool) error {
+			callsMu.Lock()
+			osState = enabled
+			autostartCalls = append(autostartCalls, enabled)
+			callsMu.Unlock()
+			if enabled {
+				firstCall.Do(func() { close(firstStarted) })
+				<-releaseFirst
+			}
+			return nil
+		},
+		persistLoginFn: func(enabled bool) error {
+			callsMu.Lock()
+			persistedCalls = append(persistedCalls, enabled)
+			callsMu.Unlock()
+			return persistErr
+		},
+	}
+
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- service.SetLaunchAtLogin(true) }()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first launch-at-login request did not start")
+	}
+
+	secondResult := make(chan error, 1)
+	go func() { secondResult <- service.SetLaunchAtLogin(false) }()
+	deadline := time.Now().Add(time.Second)
+	for atomic.LoadUint64(&service.loginOp) < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := atomic.LoadUint64(&service.loginOp); got != 2 {
+		t.Fatalf("login operation generation = %d, want newer request generation 2", got)
+	}
+	close(releaseFirst)
+
+	if err := <-firstResult; err != nil {
+		t.Fatalf("superseded launch-at-login request = %v, want successful no-op", err)
+	}
+	if err := <-secondResult; !errors.Is(err, persistErr) {
+		t.Fatalf("newer launch-at-login error = %v, want persistence error %v", err, persistErr)
+	}
+
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if osState != persistedState {
+		t.Fatalf("rollback left OS state %t and persisted state %t inconsistent", osState, persistedState)
+	}
+	if want := []bool{true, false, false}; !reflect.DeepEqual(autostartCalls, want) {
+		t.Fatalf("autostart calls = %v, want mutation plus rollback to persisted state %v", autostartCalls, want)
+	}
+	if want := []bool{false}; !reflect.DeepEqual(persistedCalls, want) {
+		t.Fatalf("persisted calls = %v, want only newer request %v", persistedCalls, want)
 	}
 }
 

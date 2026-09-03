@@ -21,16 +21,23 @@ describe('parseCustomThemes', () => {
     expect(parseCustomThemes(JSON.stringify([theme()]))).toHaveLength(1);
   });
 
-  it('rejects incomplete or invalid custom color maps', () => {
+  it('accepts partial custom color maps', () => {
     const incomplete = colors();
     delete incomplete.background;
+
+    expect(parseCustomThemes(JSON.stringify([theme({ colors: incomplete })]))).toHaveLength(1);
+  });
+
+  it('rejects custom color maps with non-string provided values', () => {
     const invalidValue = { ...colors(), foreground: null };
 
-    expect(parseCustomThemes(JSON.stringify([
-      theme({ colors: incomplete }),
-      theme({ colors: invalidValue }),
-      null,
-    ]))).toEqual([]);
+    expect(parseCustomThemes(JSON.stringify([theme({ colors: invalidValue })]))).toEqual([]);
+  });
+
+  it('discards malformed entries without rejecting valid themes', () => {
+    const valid = theme({ colors: { background: '#101014' } });
+
+    expect(parseCustomThemes(JSON.stringify([valid, null, { id: 'missing-fields' }]))).toEqual([valid]);
   });
 });
 
