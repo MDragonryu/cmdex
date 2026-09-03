@@ -141,8 +141,8 @@ Integration is toggled by `AppSettings.ShellIntegration` (nil = enabled). Change
 
 `RunCommand(commandID, variables)` does the following:
 
-1. Load the command; substitute `{{vars}}` via `ReplaceTemplateVars`.
-2. `stripShebang`, then trim trailing newlines.
+1. Load the command, evaluate CEL defaults, and merge supplied variable values. A referenced required variable with neither a supplied value nor a default stops here; `RunCommand` returns an in-band `ExecutionRecord{ExitCode: -1, Error: ...}` before writing to the PTY. Unused variable definitions do not block execution.
+2. Substitute `{{vars}}` via `ReplaceTemplateVars`, then `stripShebang` and trim trailing newlines. Placeholders with no definition remain unchanged because that low-level helper does not validate them.
 3. Resolve the active session's shell (`SessionInfo.ShellPath`, falling back to `detectShell()` for a not-yet-started session) and the working directory (`""` if none is configured), then call `buildCommandLine(shellPath, script, workingDir)`.
 4. `buildCommandLine` classifies the shell by base name into a dialect (POSIX / cmd.exe / PowerShell — see `shellDialectFor`) and composes the final line: an optional cd prefix syntactically correct for that dialect — POSIX `cd '<dir>' && ` (`shellQuoteDir`), cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` (Windows PowerShell 5.1 has no `&&` operator; `-ErrorAction Stop` preserves short-circuit-on-failure) — followed by the script, with every line terminated by the dialect's actual submit key: `\n` for POSIX (a Unix pty's line discipline accepts it), `\r` for cmd.exe/PowerShell (ConPTY has no line discipline and delivers a bare LF as a literal Ctrl+J, not Enter — see issue #63). Write the finished line to the **active session's PTY** via `terminalSvc.Write`.
 
@@ -152,7 +152,7 @@ Consequences worth internalizing:
 - **No execution history is persisted.** `db.go` still defines `GetExecutions`/`AddExecution`/`ClearExecutions` and the `executions` table still exists, but nothing in production calls them — they are referenced only from `execution_service_test.go`. Vestigial.
 - Ctrl+C works naturally: the PTY has a real foreground process group.
 - Interactive prompts, colors, and TUIs work, because it is a real terminal.
-- With no active session (or a nil `terminalSvc`), `RunCommand` returns `ExecutionRecord{ExitCode: -1, Error: ...}` rather than rejecting the promise.
+- With no active session, a nil `terminalSvc`, or a missing referenced required variable, `RunCommand` returns `ExecutionRecord{ExitCode: -1, Error: ...}` rather than writing to the PTY or rejecting the promise.
 
 ### Script Handling (`script.go`)
 
@@ -160,7 +160,7 @@ Pure functions, no I/O:
 
 - **`GenerateScript`** — trims the body and adds a trailing newline. **It does not add a shebang.**
 - **`ParseScriptBody`** — strips a leading `#!` line, so scripts saved by older versions (which did store `#!/bin/bash`) still edit cleanly.
-- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and verbatim substitution. Unresolved placeholders are left as-is; command authors add shell quoting when a value must remain one word.
+- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and verbatim substitution. The helper leaves placeholders without values unchanged; `ExecutionService.resolveScript` evaluates defaults, rejects referenced required variables without a value before PTY dispatch, and ignores unused variable definitions. Command authors add shell quoting when a value must remain one word.
 - **`MergeDetectedVars`** — merges auto-detected variables with manually defined ones: detected first in detection order, then manual-only variables with their relative order preserved, with metadata (description, default, example) carried over.
 
 ### Working Directory Resolution
@@ -292,7 +292,8 @@ User presses Run (⌘/Ctrl+Enter)
 ┌──────────────────────────────────────────────┐
 │ ExecutionService.RunCommand(id, variables)   │
 │   1. load command from DB                     │
-│   2. ReplaceTemplateVars → stripShebang       │
+│   2. resolveScript: defaults, validation,      │
+│      ReplaceTemplateVars → stripShebang       │
 │   3. buildCommandLine(shellPath, script, wd)  │
 │      → shell-dialect cd prefix + submit key   │
 │   4. terminalSvc.Write(activeSession, line)   │
